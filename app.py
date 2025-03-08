@@ -48,14 +48,59 @@ df = cargar_datos()
 edited_df = st.data_editor(df, num_rows="dynamic")
 #----------------------------------------------------------------------------------------
 
+
+
+
+
+
+# Suponiendo que 'edited_df' es el DataFrame con los datos editados
+# Y 'worksheet' es el objeto de la hoja de Google Sheets
+
+def actualizar_datos_modificados(worksheet, edited_df):
+    # Leer los datos actuales desde Google Sheets
+    data_actual = worksheet.get_all_values()
+
+    # Comparar los datos y encontrar las celdas modificadas
+    rows_to_update = []
+    for i, row in enumerate(edited_df.values.tolist()):
+        for j, new_value in enumerate(row):
+            # Si el valor en la hoja de Google Sheets es diferente del valor en 'edited_df', se actualizará
+            if data_actual[i + 1][j] != str(new_value):  # i + 1 porque los datos de Google Sheets empiezan en la fila 2
+                rows_to_update.append((i + 2, j + 1, new_value))  # Guardar la fila y columna para actualizar
+
+    # Actualizar las celdas modificadas
+    for row in rows_to_update:
+        row_index, col_index, new_value = row
+        worksheet.update_cell(row_index, col_index, new_value)
+
+    st.success(f"Se han actualizado {len(rows_to_update)} celdas en Google Sheets.")
+
+
+# Botón de actualización en Streamlit
+if st.button("Actualizar datos en Google Sheets"):
+    actualizar_datos_modificados(worksheet, edited_df)
+
+
+
+
+
+
+
+
+
 # Detectar cambios
-if st.button("Guardar cambios"):
-    data_actualizado = [edited_df.columns.values.tolist()] + edited_df.values.tolist()  # Convierte a lista de listas
-    
-    # Sobrescribe los datos SIN borrar toda la hoja
-    worksheet.update("A1", data_actualizado)  
-    
-    st.success("¡Datos actualizados correctamente en Google Sheets!")
+#if st.button("Guardar cambios"):
+    # Elimina los NaN en el DataFrame
+    #data_actualizado = [[cell if not (isinstance(cell, float) and np.isnan(cell)) else "" for cell in row] for row in data_actualizado]
+
+    # Convierte el DataFrame a lista de listas
+    #data_actualizado = [edited_df.columns.values.tolist()] + edited_df.values.tolist()
+
+    # Determina el rango que se va a actualizar (A1 hasta la última celda de datos)
+    #range_ = f"A1:{chr(65 + len(edited_df.columns))}{len(edited_df)}"
+
+    # Actualiza el rango de la hoja sin borrar los datos previos
+    #worksheet.update(range_, data_actualizado)
 
 # ------------------- Función para obtener el último ID en Google Sheets -------------------
 def obtener_ultimo_id(sheet):
