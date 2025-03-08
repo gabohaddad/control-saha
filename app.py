@@ -4,11 +4,13 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import time  # Importar el módulo time
+import numpy as np
 
 #from google_sheets import obtener_registros
 from google_sheets import cargar_registros_a_google_sheets
 import gspread
 from google.oauth2.service_account import Credentials
+
 
 #----------------------------------------------------------------------------
 def autenticacion_google_sheets():
@@ -25,6 +27,35 @@ def autenticacion_google_sheets():
     cliente = gspread.authorize(credenciales)
     
     return cliente
+#------------------------------------------------------------------------------------------
+# 🔗 Llamar la función para autenticar y obtener el cliente
+cliente = autenticacion_google_sheets()
+
+# 📄 Reemplaza con tu Sheet ID obtenido de la URL de Google Sheets
+SHEET_ID = "1bbzGDZxsppCplXh7A1OEOAH1rVMXbk6sfCEYkNVrMoQ"
+
+# 🔍 Acceder a la primera hoja del archivo
+worksheet = cliente.open_by_key(SHEET_ID).sheet1
+
+# 📥 Cargar datos de Google Sheets en un DataFrame
+def cargar_datos():
+    data = worksheet.get_all_records()
+    return pd.DataFrame(data)
+
+df = cargar_datos()
+
+# 📋 Mostrar tabla editable en Streamlit
+edited_df = st.data_editor(df, num_rows="dynamic")
+#----------------------------------------------------------------------------------------
+
+# Detectar cambios
+if st.button("Guardar cambios"):
+    data_actualizado = [edited_df.columns.values.tolist()] + edited_df.values.tolist()  # Convierte a lista de listas
+    
+    # Sobrescribe los datos SIN borrar toda la hoja
+    worksheet.update("A1", data_actualizado)  
+    
+    st.success("¡Datos actualizados correctamente en Google Sheets!")
 
 # ------------------- Función para obtener el último ID en Google Sheets -------------------
 def obtener_ultimo_id(sheet):
