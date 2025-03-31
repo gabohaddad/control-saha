@@ -467,7 +467,7 @@ def mostrar_resumen_ingresos(df, titulo):
         # Agregar el total en USD debajo del DataFrame
         st.markdown(f"##### **Total de BsF en USD: ${total_usd:,.2f}**")
         st.markdown("--------------------------------------------------")
-
+        st.success("esta s una prueba")
 
         # Mostrar los totales correctamente
         for _, row in total_ingresos.iterrows():
