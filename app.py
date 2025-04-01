@@ -10,18 +10,26 @@ import numpy as np
 from google_sheets import cargar_registros_a_google_sheets
 import gspread
 from google.oauth2.service_account import Credentials
+from dotenv import load_dotenv
+import os
 
 
 #----------------------------------------------------------------------------
+# Obtener la ruta del archivo JSON desde la variable de entorno .env
+
+load_dotenv()
+GOOGLE_SHEET_JSON_PATH = os.getenv('GOOGLE_SHEET_JSON_PATH')
+
 def autenticacion_google_sheets():
     # Define el alcance de la autenticación
     alcance = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     
     # Cargar las credenciales
-    credenciales = Credentials.from_service_account_file(
-        'C:/Users/USUARIO/Documents/Proyecto python finanzas personales/coastal-range-452621-e4-14db891d7262.json',  # Ruta al archivo JSON
-        scopes=alcance
-    )
+    credenciales = Credentials.from_service_account_file(GOOGLE_SHEET_JSON_PATH, scopes=alcance)
+
+    print(f"Ruta del archivo JSON: {GOOGLE_SHEET_JSON_PATH}")
+    
+
     
     # Autenticar y obtener el cliente de Google Sheets
     cliente = gspread.authorize(credenciales)
@@ -31,12 +39,23 @@ def autenticacion_google_sheets():
 #-----------------------------------------------------------------------------------------
 # --- Función para cargar los datos de Google Sheets en un dataframe---
 def cargar_datos():
+    
  
  # 🔗 Llamar la función para autenticar y obtener el cliente
     cliente = autenticacion_google_sheets()
+    # creamos el archivo .env para guardar las claves sensibles que guardan data como google sheet
+    # de esta manera si lo subimos Git Hub nadie puede ver la data
 
  # 📄 Reemplaza con tu Sheet ID obtenido de la URL de Google Sheets
-    SHEET_ID = "1bbzGDZxsppCplXh7A1OEOAH1rVMXbk6sfCEYkNVrMoQ"
+    # Cargar las variables de entorno desde el archivo .env
+    load_dotenv()
+
+    # Obtener el SHEET_ID desde la variable de entorno
+    SHEET_ID = os.getenv('SHEET_ID')
+
+    # Ahora puedes usar SHEET_ID como lo hacías en el código original
+    worksheet = cliente.open_by_key(SHEET_ID).sheet1
+
 
  # 🔍 Acceder a la primera hoja del archivo
     worksheet = cliente.open_by_key(SHEET_ID).sheet1
