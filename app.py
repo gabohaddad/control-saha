@@ -39,7 +39,7 @@ def autenticacion_google_sheets():
 #-----------------------------------------------------------------------------------------
 # --- Función para cargar los datos de Google Sheets en un dataframe---
 def cargar_datos():
-    
+    load_dotenv()
  
  # 🔗 Llamar la función para autenticar y obtener el cliente
     cliente = autenticacion_google_sheets()
@@ -48,7 +48,7 @@ def cargar_datos():
 
  # 📄 Reemplaza con tu Sheet ID obtenido de la URL de Google Sheets
     # Cargar las variables de entorno desde el archivo .env
-    load_dotenv()
+    
 
     # Obtener el SHEET_ID desde la variable de entorno
     SHEET_ID = os.getenv('SHEET_ID')
@@ -486,8 +486,7 @@ def mostrar_resumen_ingresos(df, titulo):
         # Agregar el total en USD debajo del DataFrame
         st.markdown(f"##### **Total de BsF en USD: ${total_usd:,.2f}**")
         st.markdown("--------------------------------------------------")
-        st.success("esta s una prueba")
-
+        
         # Mostrar los totales correctamente
         for _, row in total_ingresos.iterrows():
             tipo_pago = row["TIPO DE PAGO"]
