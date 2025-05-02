@@ -2,7 +2,7 @@
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 import time  # Importar el módulo time
 import numpy as np
 
@@ -11,35 +11,48 @@ from google_sheets import cargar_registros_a_google_sheets
 import gspread
 from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
+
 import os
+
 
 
 #----------------------------------------------------------------------------
 # Obtener la ruta del archivo JSON desde la variable de entorno .env
 
-load_dotenv()
-GOOGLE_SHEET_JSON_PATH = os.getenv('GOOGLE_SHEET_JSON_PATH')
-
 def autenticacion_google_sheets():
+
+    load_dotenv()
+    GOOGLE_APPLICATION_CREDENTIALS = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+
+    if GOOGLE_APPLICATION_CREDENTIALS:
+        print(f"La ruta de las credenciales es: {GOOGLE_APPLICATION_CREDENTIALS}")
+    else:
+        print("La variable de entorno 'GOOGLE_APPLICATION_CREDENTIALS' no se ha cargado correctamente.")
+    
+    if GOOGLE_APPLICATION_CREDENTIALS is None or GOOGLE_APPLICATION_CREDENTIALS.strip() == "":
+        raise ValueError("No se encontró la clave en la variable de entorno o está vacía.")
+
     # Define el alcance de la autenticación
-    alcance = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    
-    # Cargar las credenciales
-    credenciales = Credentials.from_service_account_file(GOOGLE_SHEET_JSON_PATH, scopes=alcance)
 
-    print(f"Ruta del archivo JSON: {GOOGLE_SHEET_JSON_PATH}")
+    SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     
+    # Cargar las credenciales desde el archivo JSON
 
+    # ESTOS SON LOS CREDEDENCIALES QUE SE GENERARON EN GOOGLE CLOUD PARA ESTE PROYECTO
+    credentials = Credentials.from_service_account_file(GOOGLE_APPLICATION_CREDENTIALS,scopes=SCOPES)
+    #credentials = Credentials.from_service_account_file("C:/Users/USUARIO/Documents/coastal-range-452621-e4-14db891d7262.json",scopes=SCOPES)
+    
     
     # Autenticar y obtener el cliente de Google Sheets
-    cliente = gspread.authorize(credenciales)
+    cliente = gspread.authorize(credentials)
     
     return cliente
-
+   
 #-----------------------------------------------------------------------------------------
 # --- Función para cargar los datos de Google Sheets en un dataframe---
+ 
 def cargar_datos():
-    load_dotenv()
+    
  
  # 🔗 Llamar la función para autenticar y obtener el cliente
     cliente = autenticacion_google_sheets()
@@ -53,11 +66,10 @@ def cargar_datos():
     # Obtener el SHEET_ID desde la variable de entorno
     SHEET_ID = os.getenv('SHEET_ID')
 
-    # Ahora puedes usar SHEET_ID como lo hacías en el código original
-    worksheet = cliente.open_by_key(SHEET_ID).sheet1
-
-
  # 🔍 Acceder a la primera hoja del archivo
+    # esta parte es para cargar los datos al programa para trabajar con ellos en las diferentes
+    # secciones
+    
     worksheet = cliente.open_by_key(SHEET_ID).sheet1
     # Leer los datos de Google Sheets
     data = worksheet.get_all_records()
@@ -69,36 +81,55 @@ def cargar_datos():
     
     return pd.DataFrame(data), worksheet
 
+    # Cargar datos solo si no están en session_state
+if "df" not in st.session_state or "worksheet" not in st.session_state:
+    st.session_state.df, st.session_state.worksheet = cargar_datos()
+
+
 #----------------------------------------------------------------------------------------
 # --- Función para ver registros ---  creacion del data frame para google sheet
-
-# 📥 Cargar datos de Google Sheets en un DataFrame aca se traen los registros de la hoja de calculo
+# --- Función para ver registros y actualizar df desde Google Sheets ---
 def ver_registros():
-    st.title("Registros de Transacciones")
-    
-    # Cargar los datos de Google Sheets
-    df, worksheet = cargar_datos()
-#--------------------
-    # Guardar los datos en st.session_state si no están ya almacenados
-    if "df" not in st.session_state:
-        st.session_state.df = df
-        st.session_state.worksheet = worksheet
+    # ✅ Limpia estado previo de edición
+    st.session_state.pop("edicion_activa", None)
 
-    # Verifica si "Monto" está en df antes de hacer cambios
+    # ✅ Carga o actualiza los datos desde Google Sheets
+    if "df" not in st.session_state or "worksheet" not in st.session_state:
+        st.session_state.df, st.session_state.worksheet = cargar_datos()
+
+    # Actualiza los datos desde worksheet (por si ya estaban)
+    data_actual = st.session_state.worksheet.get_all_records()
+    df_actualizado = pd.DataFrame(data_actual)
+    
+    # Cambiar los nombres de las columnas a mayúsculas
+    df_actualizado.columns = df_actualizado.columns.str.upper()
+
+    
+
+# ✅ Conversión segura de fechas
+    if "FECHA" in df_actualizado.columns:
+     df_actualizado["FECHA"] = pd.to_datetime(df_actualizado["FECHA"], format="%d/%m/%Y", errors="coerce")
+         # ✅ Formato de fecha para visualización
+    df_actualizado["FECHA"] = df_actualizado["FECHA"].dt.strftime("%d/%m/%Y")
+
+
+    st.session_state.df = df_actualizado
+
+    # Limpieza y conversión de columna "Monto"
     if "Monto" in st.session_state.df.columns:
-        # Reemplazar comas por puntos y convertir a float
-        st.session_state.df["Monto"] = st.session_state.df["Monto"].astype(str).str.replace(",", ".").astype(float) 
+        st.session_state.df["Monto"] = (
+            st.session_state.df["Monto"]
+            .astype(str)
+            .str.replace(",", ".", regex=False)
+            .astype(float)
+        )
 
-   
-    # Mostrar la tabla sin índice en modo solo lectura
-    st.dataframe(df, hide_index=True)
+    # ✅ Mostrar la tabla actualizada (solo visual)
+    st.dataframe(st.session_state.df, hide_index=True)
 
-    
-#----------------------------------------------------------------------------------------
-
+#------------------------------------------------------------------------------
 # Inicializar una lista vacía para almacenar los registros
 # Inicializar variables en session_state si no existen
-
 
 if "registros" not in st.session_state:
     st.session_state.registros = []
@@ -120,45 +151,82 @@ if 'monto' in st.session_state:
 else:
     monto = 0.01  # Valor predeterminado si no está en session_state
 
-    
+#----------------------------------------------------------------------------------------
+# esta funcion es para estandarizar los formatos de tipo panda a tipo basico de python para
+# evitar conflictos
+def convertir_a_tipos_nativos(lista_valores):
+    """
+    Convierte elementos numpy (int64, float64) a tipos nativos de Python (int, float).
+    """
+    return [
+        int(x) if isinstance(x, (np.int64, np.int32)) else
+        float(x) if isinstance(x, (np.float64, np.float32)) else
+        str(x) if not isinstance(x, (int, float, str)) else x
+        for x in lista_valores
+    ]
+
+
 #------------------------------------------------------------------------------------------
-
-
 # ESTE BLOQUE ES LA INTERACCION ENTRE LA LISTA DE GOOGLE SHEET QUE VIENE A LA PANTALLA PARA EDITAR Y LA HOJA DE CALCULO 
 # Suponiendo que 'edited_df' es el DataFrame con los datos editados
 # Y 'worksheet' es el objeto de la hoja de Google Sheets ACA SE VAN REGISTRA LOS DATOS EDITADOS DE LA PAGINA
 # VER REGISTROS
 
-def actualizar_datos_modificados(worksheet,df,edit_id):
-    pass
+def actualizar_datos_modificados(worksheet, edit_id, fecha, categoria, subcategoria, 
+                                 responsable, descripcion,monto,tipo_pago,tasa_cambio):
+    
+    # Convertir la fecha a formato datetime si es necesario
+    if isinstance(fecha, str):  # Si la fecha viene como string
+        fecha = datetime.strptime(fecha, "%d/%m/%Y")
+    
     # Leer los datos actuales desde Google Sheets
     data_actual = worksheet.get_all_values()
+    edit_id = str(edit_id)
 
-# Asegurarse de que los datos de Google Sheets tengan suficientes filas
-    num_filas = len(data_actual)
-     
+    # Asegurarse de que los datos de Google Sheets tengan suficientes filas
+    #num_filas = len(data_actual)
 
-    for i, row in df.iterrows():  # Iterar sobre las filas del DataFrame
-        for j, col_name in enumerate(df.columns):
-            new_value = row[col_name]
+    # Buscar el ID del registro que se quiere editar en Google Sheets
+    for i, row in enumerate(data_actual[1:], start=1):  # Comienza desde la fila 2 (para omitir encabezado)
+        if row[0] == edit_id:  # Suponiendo que el ID está en la primera columna
+            fila_editada = i + 1  # Fila donde se encuentra el registro que se quiere editar
+            break
+        
 
+    else:
+        st.error(f"No se encontró el registro con ID {edit_id}.")
+        return
 
-            if col_name == "TASA DE CAMBIO" and (data_actual[i + 1][j] == "" or data_actual[i + 1][j] is None):
-                    st.write(f"La columna 'TASA DE CAMBIO' está vacía en la fila {i + 2}. Se asignará 1.")
-                    new_value = 1  # Asignamos el valor por defecto
-            else:
-                    new_value = row[col_name]  # Usamos el valor existente
+    # Obtener los nuevos valores del DataFrame y asegurarse de que no sean vacíos
+    new_values = {
+        "FECHA": fecha.strftime("%d/%m/%Y"),
+        "CATEGORIA": categoria,
+        "SUBCATEGORIA": subcategoria,
+        "RESPONSABLE": responsable,
+        "DESCRIPCION": descripcion,
+        "MONTO":monto,
+        "TIPO DE PAGO":tipo_pago,
+        "TASA DE CAMBIO": tasa_cambio
 
-            if i + 1 < num_filas:  # Verificar que i + 1 esté dentro del rango
-                if data_actual[i + 1][j] != str(new_value):  # Compara con los valores existentes
-                    worksheet.update_cell(i + 2, j + 1, str(new_value))  # Actualizar la celda en la hoja de Google Sheets
-            else:
-                st.error(f"Índice {i + 1} está fuera del rango de filas de Google Sheets")
-                return
+    }
 
-    # Mostrar mensaje de éxito al usuario después de la actualización
-    st.success(f"¡El registro con ID {edit_id} se ha actualizado correctamente en Google Sheets!")
-    
+             # Actualizar los valores en Google Sheets (empezando desde la columna 2)
+    for j, (col_name, new_value) in enumerate(new_values.items(), start=2):
+        if data_actual[fila_editada - 1][j - 1] != str(new_value):
+            worksheet.update_cell(fila_editada, j, str(new_value))
+
+    # ✅ Refrescar el DataFrame una sola vez al final
+    data_actualizada = worksheet.get_all_values()
+    df_actualizado = pd.DataFrame(data_actualizada[1:], columns=data_actualizada[0])
+
+    # Actualizar en session_state si se está usando
+    st.session_state.df = df_actualizado
+
+    st.rerun()
+
+    # También puedes devolver el df actualizado si lo necesitas fuera
+    st.success(f"¡El registro con ID {edit_id} se ha actualizado correctamente!")
+
     
 #=========================================================================================================
 
@@ -202,14 +270,16 @@ def cargar_registros_a_google_sheets(registros,nombre_archivo="BD REGISTROS FINA
 
 #---------------------------------------------------------------------------------------------
 # Función para agregar un nuevo registro
-# DEFINICION DE VARIABLES PARA NUEVO REGISTRO
 
 # DEFINICION DE VARIABLES PARA NUEVO REGISTRO
 def agregar_registro(fecha, categoria, descripcion, monto, tipo_pago, tasa_cambio=None, 
                      subcategoria=None, responsable=None):
         
+    # Convertir la fecha a formato "día/mes/año"
+    fecha_formateada = fecha.strftime("%d/%m/%Y")  # Fecha convertida a formato adecuado
+        
     # Validación de datos
-    if not fecha or not descripcion or not monto or not tipo_pago:
+    if not fecha_formateada or not descripcion or not monto or not tipo_pago:
         st.warning("Por favor, complete todos los campos obligatorios.")
         return
 
@@ -227,14 +297,18 @@ def agregar_registro(fecha, categoria, descripcion, monto, tipo_pago, tasa_cambi
         if not tasa_cambio or tasa_cambio <= 0:
             st.warning("La tasa de cambio debe ser un número positivo.")
             return
+                
     else:
         tasa_cambio = 1  # Si no es BSF, siempre será 1# No es necesario pedir la tasa de cambio si no es BSF
 
+    # ✅ Asegura que la fecha sea string antes de pasarla al registro
+    if isinstance(fecha, (datetime, date)):
+        fecha = fecha.strftime("%d/%m/%Y")
 
     # Si la validación pasa, agregar el registro a la tabla resumen en streamlit
-    # estos son los datos que pasan a la tabla de st
+    # estos son los datos que pasan a la tabla de df
     registro = {
-        "Fecha": fecha.strftime("%Y-%m-%d"),  # ✅ Convertir fecha a cadena se necesita para google sheet
+        "Fecha": fecha_formateada,  # ✅ Convertir fecha a cadena se necesita para google sheet
         "Categoría": categoria,
         "Subcategoría": subcategoria if subcategoria else "No especificado",  # Valor predeterminado si es None
         "Responsable": responsable if responsable else "No especificado",  # Valor predeterminado si es None
@@ -254,23 +328,46 @@ def agregar_registro(fecha, categoria, descripcion, monto, tipo_pago, tasa_cambi
 
 
         # Reiniciar la variable cuando el botón es presionado
-        #st.session_state.registro_a_editar["DESCRIPCION"] = ""
-        
-        #limpiar_campos()
+
+         #Marca una bandera para limpiar en el próximo ciclo
+        st.session_state.limpiar = True
+
         st.rerun()
 
     except Exception as e:
         st.error(f"Hubo un problema al guardar el registro en Google Sheets: {e}")
 
 #===================================================================================================
+def limpiar_campos():
+    keys_a_borrar = [
+        "categoria", "subcategoria_tipo", "subcategoria_fijo", "subcategoria_variable",
+        "responsable", "subcategoria_ingreso", "responsable_ingreso", "descripcion",
+        "monto", "tipo_pago", "tasa_cambio"
+    ]
+    for key in keys_a_borrar:
+        if key in st.session_state:
+            del st.session_state[key]
+    st.session_state.limpiar = False
+    st.rerun()
+#---------------------------------------------------------------------------------
+
 # Interfaz de usuario SECCION DONDE SE CARGAN LOS DATOS (WIDGETS) (formulario)
 
 def formulario_de_registro():
 
 
+    # 🔄 LIMPIEZA DEL FORMULARIO SI LA BANDERA 'limpiar' ESTÁ ACTIVA
+    if st.session_state.get("limpiar",False):
+        limpiar_campos()
+        return # este return detiene que se sigan crando widgets antes de limpiar los campos
+        
     # Ingreso de datos
     fecha = st.date_input("Fecha de la transacción", value=datetime.today().date(), key="fecha")
-    categoria = st.selectbox("Selecciona la categoría", ["Ingreso", "Gasto"], key="categoria")
+    
+    # Convertir la fecha a formato "día/mes/año"
+    fecha_formateada = fecha.strftime("%d/%m/%Y")
+
+    categoria = st.selectbox("Selecciona la categoría", ["","Ingreso", "Gasto"], key="categoria")
 
     # Subcategorías para ingresos 
     subcategorias_ingreso = ["","Ventas Saha", "Ventas Netlink", "Alquiler", "Aporte de Capital",
@@ -281,6 +378,7 @@ def formulario_de_registro():
     subcategorias_gasto_fijo = ["","Alquiler", "Nómina", "Servicios", "Gas", "Piscina", "Contadora","Mantenimiento"]
     subcategorias_gasto_variable = ["","Publicidad", "Comisiones", "Transporte", "Comida","SEMAT","IVA","ISLR","IVSS","FAO","Pensiones","Patente","Otros"]
 
+    
     subcategoria = None
     responsable = None
 
@@ -310,149 +408,42 @@ def formulario_de_registro():
 
     monto = st.number_input("Ingrese el monto",  step=0.01, format="%.2f", key="monto")
     
-
     # Opciones de pago
     tipo_pago = st.selectbox("Selecciona el tipo de pago", ["Dólares", "Zelle", "BSF"], key="tipo_pago")
 
-        
-    # Si el pago es en BSF, solicitar la tasa de cambio
-    tasa_cambio = 1  # Valor predeterminado
+    # Mostrar input solo si el tipo de pago es BSF
     if tipo_pago == "BSF":
-        tasa_cambio = st.number_input("Por favor ingrese la tasa de cambio:", 
-                                      min_value=0.01, step=0.01, 
-                                      key="tasa_cambio")
+        tasa_cambio = st.number_input("Tasa de cambio", min_value=0.0, format="%.2f")
+        if tasa_cambio == 0.0:
+            st.warning("⚠️ Para pagos en BSF debes ingresar la tasa de cambio.")
     else:
-        # Si no es en BSF, asignamos 1 y lo guardamos en session_state
+        tasa_cambio = 1.0  # Se fija automáticamente si no es BSF
         st.session_state.tasa_cambio = tasa_cambio  # Asegurar que session_state refleje este valor
 
  #-------------------------------------------------------------------------------------------   
  # Botón para agregar el registro
 
     if st.button("Agregar registro"):
-                
+
+        if tipo_pago == "BSF" and tasa_cambio in [0.0, 1.0]:
+            st.warning("❌ No puedes guardar el registro sin ingresar una tasa de cambio.")
+            return
+                   
+        
         if descripcion and monto > 0 :
-        #or subcategorias_ingreso != "" or subcategorias_gasto_fijo != "" 
-            #or subcategorias_gasto_variable != "" or responsable != ""):  # Validar que los campos no estén vacíos
         
-        # Aquí iría la lógica para agregar el registro a la base de datos
+            # Aquí iría la lógica para agregar el registro a la base de datos
          
-         agregar_registro(fecha, categoria, descripcion, monto, tipo_pago, tasa_cambio, subcategoria, responsable)
-         st.success("Registro agregado correctamente")
-         time.sleep(0.5)
+            agregar_registro(fecha, categoria, descripcion, monto, tipo_pago, tasa_cambio, subcategoria, responsable)
+            st.success("Registro agregado correctamente")
+            time.sleep(0.5)
+     
+                # Activar la limpieza de campos
+            st.session_state.limpiar = True
 
-        # Limpiar los campos después de agregar el registro
-               
         else:
-          st.warning("Por favor, completa todos los campos antes de agregar el registro.")    
+            st.warning("Por favor, completa todos los campos antes de agregar el registro.")    
 
-#------------------------------------------------------------------------------------- 
-#ESTE MODULO ES EL FORMATO QUE APARECE DEBAJO DEL DATA FRAME DE GOOGLE SHEET PARA REALIZAR LA EDICION DE 
-# LOS CAMPOS DEL REGISTRO SELECCIONADO
-
-    # Función para editar un registro específico
-def edicion_de_registro(id_registro):
-    df, worksheet = cargar_datos()
-
-    if df.empty:
-        st.warning("No hay registros disponibles para editar.")
-        return
-
-    df["ID"] = df["ID"].astype(int)  # Asegurar que los IDs sean enteros
-    min_id, max_id = df["ID"].min(), df["ID"].max()
-    
-    st.write("Número total de registros en el DataFrame:", len(df)) 
-
-    
-# Verificamos si el ID está en el rango
-    if id_registro < min_id or id_registro > max_id:
-        st.error("El ID seleccionado no existe.")
-        return
-    
-    # UNA VEZ SELECCIONADO EL ID Y VERIFICADO QUE EXISTE A CONTINUACION SE DESARROLLA OTRO
-    # FORMULARIO
-    # El df loc selecoiona todos los datos de ese registro y rellena los campos
-    edit_index = df[df["ID"] == id_registro].index[0]
-    registro_a_editar = df.loc[edit_index]
-
-    
-
-    fecha = st.date_input("Fecha de la transacción", value=pd.to_datetime(registro_a_editar["FECHA"]).date())
-#----------------------------------------------------------------------------------------
-# Esta seccion impide que se cambie de ingreso a gasto o viceversa para editar
-# da un warning de eliminar el registro
-    if "edicion_activa" not in st.session_state:
-        st.session_state.edicion_activa = registro_a_editar["CATEGORIA"]  # Guarda la categoría original
-
-    categoria = st.selectbox("Selecciona la categoría", ["Ingreso", "Gasto"], index=["Ingreso", "Gasto"].index(registro_a_editar["CATEGORIA"]))
-    
-# Si el usuario intenta cambiar de Ingreso a Gasto o viceversa
-    if st.session_state.edicion_activa != categoria:
-        st.warning("No puedes cambiar de Ingreso a Gasto o viceversa. Si necesitas corregirlo, elimina este registro y crea uno nuevo.")
-        st.stop()  # Detiene la ejecución del formulario
-#-----------------------------------------------------------------------------------
-    subcategorias = {
-        "Ingreso": ["","Ventas Saha", "Ventas Netlink", "Alquiler", "Aporte de Capital", "Otros Ingresos"]}
-
-    subcategorias_gasto_fijo ={
-        "Gasto fijo": ["","Alquiler", "Nómina", "Servicios", "Gas", "Piscina", "Contadora", "Mantenimiento"]}
-
-    subcategorias_gasto_variable={
-        "Gasto variable": ["","Publicidad", "Comisiones", "Transporte","Comida","SEMAT","IVA","ISLR","IVSS","FAO","Pensiones","Patente","Otros"]
-    }
-
-    if categoria == "Ingreso":
-        monto = max(0.01, float(registro_a_editar["MONTO"]))
-        #monto = st.number_input("Monto", min_value=0.01, step=0.01, value=monto)
-        subcategoria = st.selectbox("Selecciona la subcategoría de ingreso", subcategorias["Ingreso"], index=subcategorias["Ingreso"].index(registro_a_editar["SUB-CATEGORIA"]))
-        responsable = st.selectbox("¿A quién corresponde el ingreso?", ["SAHA", "AMINE", "Gabriel"], index=["SAHA", "AMINE", "Gabriel"].index(registro_a_editar["RESPONSABLE"]))
-    
-    else:
-        subcategoria_tipo = st.selectbox("Selecciona el tipo de gasto", ["Gasto fijo", "Gasto variable"])
-        if subcategoria_tipo == "Gasto fijo": 
-
-             subcategoria = st.selectbox(f"Selecciona la subcategoría de {subcategoria_tipo}", subcategorias_gasto_fijo["Gasto fijo"], index=subcategorias_gasto_fijo["Gasto fijo"].index(registro_a_editar["SUB-CATEGORIA"]))
-                         
-        elif subcategoria_tipo == "Gasto variable":
-             subcategoria = st.selectbox(f"Selecciona la subcategoría de {subcategoria_tipo}", subcategorias_gasto_variable["Gasto variable"], index=subcategorias_gasto_variable["Gasto variable"].index(registro_a_editar["SUB-CATEGORIA"]))
-             
-
-        responsable = st.selectbox("¿A quién corresponde el gasto?", ["SAHA", "AMINE", "Gabriel", "NETLINK"], index=["SAHA", "AMINE", "Gabriel", "NETLINK"].index(registro_a_editar["RESPONSABLE"]))
-        
-        monto = min(-0.01, float(registro_a_editar["MONTO"]))
-        #monto = st.number_input("Monto", min_value=-1000000.0, max_value=-0.01, step=0.01, value=monto)
-    
-    
-    descripcion = st.text_input("Descripción de la transacción", value=registro_a_editar["DESCRIPCION"])
-    monto = st.number_input("Monto", min_value=0.01, step=0.01, value=monto)
-    tipo_pago = st.selectbox("Selecciona el tipo de pago", ["Dólares", "Zelle", "BSF", "BSF Transfer"], index=["Dólares", "Zelle", "BSF", "BSF Transfer"].index(registro_a_editar["TIPO DE PAGO"]))
-    tasa_cambio = st.text_input("Tasa de cambio del día (si aplica)", value=registro_a_editar["TASA DE CAMBIO"] if tipo_pago == "BSF" else "")
-   #
-   # ESTE BOTON YA ME ESTA ACTUALIZANDO LA DATA EN EL DATA FRAME Y EN GOOGLE SHEET YA QUE DA LA INSTRUCCION DE
-   # IR A ACTUALIZAR DATOS MODIFICADOS
-    if st.button("Actualizar registro"):
-        df.at[edit_index, "FECHA"] = fecha
-        df.at[edit_index, "CATEGORIA"] = categoria
-        df.at[edit_index, "DESCRIPCION"] = descripcion
-        df.at[edit_index, "MONTO"] = monto
-        df.at[edit_index, "SUB-CATEGORIA"] = subcategoria
-        df.at[edit_index, "RESPONSABLE"] = responsable
-        df.at[edit_index, "TIPO DE PAGO"] = tipo_pago
-        if tipo_pago == "BSF":
-            df.at[edit_index, "TASA DE CAMBIO"] = tasa_cambio
-        
-        actualizar_datos_modificados(worksheet, df, id_registro)
-
-
-# Limpiar los campos después de actualizar
-        st.session_state.descripcion = ""  # Limpiar descripción
-        st.session_state.categoria_index = 0  # Limpiar categoría
-        st.session_state.subcategoria_index = 0  # Limpiar subcategoría
-        st.session_state.monto = 0.0  # Limpiar monto
-        st.session_state.tasa_de_cambio = ""  # Limpiar tasa de cambio
-
-        # Recargar la página para limpiar los campos
-        st.rerun()
-             
 #-----------------------------------------------------------------------------------------------------
 # CREACION DEL REPORTE DE GASTOS POR CATEGORIAS
 def mostrar_resumen_ingresos(df, titulo):
@@ -499,18 +490,20 @@ def mostrar_resumen_ingresos(df, titulo):
         st.error("Las columnas necesarias no están presentes en los datos.")
 #----------------------------------------------------------------------------------------------------
 
-
 # SECCION DE REPORTES
 
 def reporte_ingresos_por_fecha():
-    df, _ = cargar_datos()  # Cargamos los datos desde Google Sheets
+    
+    # df, _ = cargar_datos()  # Cargamos los datos desde Google Sheets
+    df = st.session_state.df
 
     if df.empty:
         st.warning("No hay datos disponibles para generar reportes.")
         return
 
     # Convertir la columna de fecha a tipo datetime``
-    df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce").dt.date
+    df["FECHA"] = pd.to_datetime(df["FECHA"], format="%d/%m/%Y", errors="coerce")
+
 
     # Filtrar solo los ingresos
     df_ingresos = df[df["CATEGORIA"] == "Ingreso"]
@@ -538,6 +531,10 @@ def reporte_ingresos_por_fecha():
     if isinstance(rango_fechas, tuple) and len(rango_fechas) == 2:
         fecha_inicio, fecha_fin = rango_fechas
 
+        # Convertimos las fechas seleccionadas a datetime
+        fecha_inicio = pd.to_datetime(fecha_inicio)
+        fecha_fin = pd.to_datetime(fecha_fin)
+
         # Filtrar ingresos dentro del rango de fechas
         df_filtrado_ingresos = df_ingresos[
             (df_ingresos["FECHA"] >= fecha_inicio) & 
@@ -548,6 +545,10 @@ def reporte_ingresos_por_fecha():
             st.warning("⚠️ No se encontraron ingresos en este rango de fechas.")
         else:
             st.success(f"📅 Mostrando datos desde {fecha_inicio} hasta {fecha_fin}")
+
+            # Mostrar la fecha en formato visual
+            df_filtrado_ingresos["FECHA"] = df_filtrado_ingresos["FECHA"].dt.strftime("%d/%m/%Y")
+
             st.dataframe(df_filtrado_ingresos)
     
           # Llamar a la función de resumen por subcategoría de ingresos
@@ -580,7 +581,8 @@ def mostrar_resumen(df, titulo):
 
 #----------------------------------------------------------------------------------------------------
 def reporte_de_gastos_por_fecha():
-    df, _ = cargar_datos()  # Cargamos los datos desde Google Sheets
+    #df, _ = cargar_datos()  # Cargamos los datos desde Google Sheets
+    df = st.session_state.df
 
     if df.empty:
         st.warning("No hay datos disponibles para generar reportes.")
@@ -588,7 +590,7 @@ def reporte_de_gastos_por_fecha():
     
     
     # Convertir la columna de fecha a tipo datetime
-    df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce").dt.date
+    df["FECHA"] = pd.to_datetime(df["FECHA"], format="%d/%m/%Y", errors="coerce")
 
     # Filtrar solo los Gastos
     df_gastos = df[df["CATEGORIA"] == "Gasto"]
@@ -614,6 +616,11 @@ def reporte_de_gastos_por_fecha():
     if isinstance(rango_fechas, tuple) and len(rango_fechas) == 2:
         fecha_inicio, fecha_fin = rango_fechas
 
+        # Convertimos las fechas seleccionadas a datetime
+        fecha_inicio = pd.to_datetime(fecha_inicio)
+        fecha_fin = pd.to_datetime(fecha_fin)
+
+
         # Filtrar gastos dentro del rango de fechas
         df_filtrado = df_gastos[
             (df_gastos["FECHA"] >= fecha_inicio) & 
@@ -625,6 +632,11 @@ def reporte_de_gastos_por_fecha():
             st.warning("⚠️ No hay gastos registrados en el rango seleccionado.")
         else:
             st.success(f"📅 Mostrando datos desde {fecha_inicio} hasta {fecha_fin}")
+
+
+            # Convertir las fechas a formato día/mes/año solo para mostrar
+            df_filtrado["FECHA"] = df_filtrado["FECHA"].dt.strftime("%d/%m/%Y")
+
             st.dataframe(df_filtrado)
 
             # Subcategorías para los tipos de gastos
@@ -664,72 +676,193 @@ def reporte_de_gastos_por_fecha():
     else:
         st.warning("⚠️ Por favor, selecciona un rango de fechas válido.")
 
-       
- #---------------------------------------------------------------------------------
-  
-       
-      
-           
-                
-                
-        
+#====================================================================================
+# diccionario de subcategrias de gastos
+subcategorias_fijas = ["Alquiler", "Nómina", "Servicios", "Gas", "Piscina", 
+                               "Contadora", "Mantenimiento"]
+subcategorias_variables = ["Publicidad", "Comisiones", "Transporte", "Comida",
+                           "SEMAT","IVA","ISLR","IVSS","FAO","Pensiones","Patente","Otros"]
+
+#------------------------------------------------------------------------------
+# este modulo junto con los diccionarios de arriba de las subcategorias de gastos
+# me permite detectar que tipo de subcategoria es fijo o variable para luego abrir
+# el diccionario correpondiente
+
+def detectar_tipo_desde_subcategoria(subcat):
+    if subcat in subcategorias_fijas:
+        return "Gasto fijo"
+    elif subcat in subcategorias_variables:
+        return "Gasto variable"
+    else:
+        return "Otro"
+
+#========================================================================================
+# Función para mostrar el formulario de edición
+def formulario_edicion(registro, worksheet, df):
+    st.subheader("Formulario de Edición")
+
+    # Mostrar los campos con los valores actuales del registro
+    try:
+        fecha_obj = datetime.strptime(registro["FECHA"], "%d/%m/%Y").date()
+    except:
+        fecha_obj = datetime.today().date()  # fallback en caso de error
+
+    fecha = st.date_input("Fecha de la transacción", value=fecha_obj, key="fecha")
 
 
-
-
-
-
-
-
-
-        
-#====================================================================================================
-
-# ESTA SECCION ES PARA CREAR EL MENU DE SELECCION ENTRE HOJA DE FORMULARIO Y REGISTROS
-
-st.sidebar.title("Navegación")
-pagina = st.sidebar.radio("Selecciona una página", ["Formulario de Registro", "Ver Registros","Reporte de Ingresos","Reporte de Gastos"], key="pagina_radio")
-
-
-# --- Control de flujo según la selección de la barra lateral ---
-if pagina == "Formulario de Registro":
-
-# 🔹 Título debe ir antes del formulario
-    st.title("Control de Ingresos y Gastos")
-    formulario_de_registro()  # Llamamos a la función que maneja la lógica del formulario
-
-# ACA SE CREA LA TABLA CON LOS REGISTROS INTRODUCIDOS EN STREAMLIT (TABLA RESUMEN)
-# Mostrar los registros guardados (solo si existen)
-    if st.session_state.registros:
-      df = pd.DataFrame(st.session_state.registros)
-      st.subheader("Registros de transacciones")
-      st.dataframe(df) 
-
-elif pagina == "Ver Registros":
-    # 🔹 Cargar los registros desde Google Sheets correctamente
-    df, worksheet = cargar_datos()  # Asegúrate de que esta función esté bien definida
-
-    st.title("Edición de Registro")
-    ver_registros()  # Llamamos a la función que muestra los registros desde Google Sheets
-
-  
-# Verificar si existen registros en Google Sheets o DataFrame
-    if not df.empty:
-        st.subheader("Selecciona un registro a editar")
-
-        # Selección del ID para la edición a través de un selectbox
-        id_registro = st.selectbox("Selecciona el ID a editar:", df["ID"].tolist(), key="select_id_editar")
-
-        # Si se selecciona un ID válido, llamamos a la función de edición
-        if id_registro:
-            edicion_de_registro(id_registro)
     
- #---------------------------------------------------------------------------------------------------
-# BOTON PARA ELIMINAR EL REGISTRO
-        st.subheader("Eliminar un registro")
-        id_eliminar = st.selectbox("Selecciona el ID a eliminar:", df["ID"].tolist(), key="select_id_eliminar")
+    # Categoría
+    categoria = st.selectbox("Selecciona la categoría", ["Ingreso", "Gasto"], index=["Ingreso", "Gasto"].index(registro["CATEGORIA"]), key="categoria")
+    # Subcategorías para ingresos 
+    subcategorias_ingreso = ["","Ventas Saha", "Ventas Netlink", "Alquiler", "Aporte de Capital",
+     
+                                    "Otros Ingresos"]
+    
+    # Subcategorías para gastos
+    subcategorias_gasto_fijo = ["","Alquiler", "Nómina", "Servicios", "Gas", "Piscina", "Contadora","Mantenimiento"]
+    subcategorias_gasto_variable = ["","Publicidad", "Comisiones", "Transporte", "Comida","SEMAT","IVA","ISLR","IVSS","FAO","Pensiones","Patente","Otros"]
+
+    subcategoria = None
+    responsable = None
+    subcategoria_tipo = None 
+
+    # Subcategorías según la categoría (Ingreso o Gasto)
+    if categoria == "Gasto":
+        subcat_actual = registro.get("SUB-CATEGORIA","")
+
+        # Detectar tipo de gasto automáticamente desde subcategoría
+        if subcat_actual in subcategorias_gasto_fijo:
+            tipo_gasto_default = "Gasto fijo"
+        elif subcat_actual in subcategorias_gasto_variable:
+            tipo_gasto_default = "Gasto variable"
+        else:
+            tipo_gasto_default = "Gasto fijo"  # fallback por defecto
+
+        subcategoria_tipo = st.selectbox(
+            "Selecciona el tipo de gasto",
+            ["Gasto fijo", "Gasto variable"],
+            index=["Gasto fijo", "Gasto variable"].index(tipo_gasto_default),
+            key=f"subcategoria_tipo_{registro['ID']}"
+        )
         
-        if st.button("❌ Eliminar seleccionado"):
+        
+        if subcategoria_tipo == "Gasto fijo":
+            subcategoria_tipo = st.selectbox(
+                "Selecciona la subcategoría de gasto fijo", 
+                subcategorias_gasto_fijo, 
+                index=subcategorias_gasto_fijo.index(subcat_actual) if subcat_actual in subcategorias_gasto_fijo else 0,
+                key="subcategoria_fijo"
+            )
+
+            subcategoria = subcategoria_tipo  # <-- AQUÍ estás asignando la subcategoría real
+
+        else:
+            subcategoria = st.selectbox(
+                "Selecciona la subcategoría de gasto variable", 
+                subcategorias_gasto_variable, 
+                index=subcategorias_gasto_variable.index(subcat_actual) if subcat_actual in subcategorias_gasto_variable else 0,
+                key="subcategoria_variable"
+            )
+            
+            subcategoria = subcategoria_tipo  # <-- AQUÍ estás asignando la subcategoría real
+
+       
+    elif categoria == "Ingreso":
+        subcategoria = st.selectbox(
+            "Selecciona la subcategoría de ingreso", 
+            subcategorias_ingreso, 
+            index=subcategorias_ingreso.index(registro["SUB-CATEGORIA"]) if registro["SUB-CATEGORIA"] in subcategorias_ingreso else 0,
+            key="subcategoria_ingreso"
+        )
+
+    # Responsable
+    responsable = st.selectbox(
+        "¿A quién corresponde?", 
+        ["SAHA", "AMINE", "Gabriel", "NETLINK"], 
+        index=["SAHA", "AMINE", "Gabriel", "NETLINK"].index(registro["RESPONSABLE"]), 
+        key="responsable"
+    )
+    
+    # Descripción
+    descripcion = st.text_input("Descripción", value=registro["DESCRIPCION"], key="descripcion")
+
+    try:
+     monto= float(registro.get("MONTO", 0))
+    except:
+     monto = 0.0
+
+    monto = st.number_input("Ingrese el monto", value=monto, step=0.01, format="%.2f", key="monto")
+
+    # Si es gasto, el monto debe ser negativo
+    if categoria == "Gasto" and monto > 0:
+        monto = -monto
+    else:
+        monto = monto
+    
+    
+    # Tipo de pago
+    tipo_pago = st.selectbox("Selecciona el tipo de pago", ["Dólares", "Zelle", "BSF"], 
+                             index=["Dólares", "Zelle", "BSF"].index(registro["TIPO DE PAGO"]), 
+                             key="tipo_pago")
+
+    
+    
+    # Mostrar input de tasa solo si es BSF
+    if tipo_pago == "BSF":
+       tasa_inicial = float(registro["TASA DE CAMBIO"]) if registro["TIPO DE PAGO"] == "BSF" else 0.0
+       
+       st.number_input(
+            "Tasa de cambio", 
+            min_value=0.0, 
+            format="%.2f", 
+            value=tasa_inicial,
+            key="tasa_cambio_edicion"
+        )
+
+    #  Obtener el valor actualizado de la tasa
+    if tipo_pago == "BSF":
+        tasa_cambio = st.session_state["tasa_cambio_edicion"]
+    else:
+        tasa_cambio = 1.0
+
+   
+    # Validación visual si tasa es incorrecta
+    if tipo_pago == "BSF" and tasa_cambio in [0.0, 1.0]:
+        st.warning("⚠️ Para pagos en BSF debes ingresar una tasa de cambio válida (> 1).")
+
+
+#--------------------------------------------------------------------------------------------------------
+    # Botón para guardar los cambios
+        
+    if st.button("Actualizar Registro"):
+        
+        if tipo_pago == "BSF" and tasa_cambio in [0.0, 1.0]:
+            st.warning("❌ No puedes guardar el registro sin ingresar una tasa de cambio.")
+            return
+        
+         
+        # Verificar que todos los campos sean válidos (puedes agregar validación extra si es necesario)
+        if categoria and subcategoria and responsable and monto:
+
+
+            # Actualizamos el registro en el DataFrame y Google Sheets
+
+            
+            actualizar_datos_modificados(worksheet, registro["ID"], fecha, 
+                                         categoria, subcategoria, responsable, descripcion, 
+                                         monto, tipo_pago, tasa_cambio)
+            st.success("Registro actualizado exitosamente!")
+        else:
+            st.warning("Por favor, completa todos los campos.")
+
+#====================================================================================================
+# BOTON PARA ELIMINAR EL REGISTRO
+    st.subheader("Eliminar un registro")
+
+    if not df.empty:  
+       id_eliminar = st.selectbox("Selecciona el ID a eliminar:", df["ID"].tolist(), key="select_id_eliminar")
+        
+       if st.button("❌ Eliminar seleccionado"):
             # Verificar si el ID existe en el DataFrame
             if id_eliminar in df["ID"].values:
                 df = df[df["ID"] != id_eliminar]  # Eliminar el registro con ese ID
@@ -741,7 +874,11 @@ elif pagina == "Ver Registros":
                 worksheet.clear()
                 worksheet.update([df.columns.values.tolist()] + df.values.tolist())
 
-                st.success(f"Registro con ID {id_eliminar} eliminado con éxito.")
+                # ✅ Limpia edicion_activa
+                if "edicion_activa" in st.session_state:
+                    del st.session_state.edicion_activa
+
+                    st.success(f"Registro con ID {id_eliminar} eliminado con éxito.")
 
 
                 st.rerun()  # Recargar la app
@@ -750,15 +887,87 @@ elif pagina == "Ver Registros":
     else:
         st.warning("No hay registros disponibles para editar.")
 
+#---------------------------------------------------------------------------------------------------
+
+
+# ESTA SECCION ES PARA CREAR EL MENU DE SELECCION ENTRE HOJA DE FORMULARIO Y REGISTROS SIDEBAR
+
+st.sidebar.title("Navegación")
+pagina = st.sidebar.radio("Selecciona una página", ["Formulario de Registro", "Ver Registros","Reporte de Ingresos","Reporte de Gastos"], key="pagina_radio")
+
+
+# --- Control de flujo según la selección de la barra lateral ---
+if pagina == "Formulario de Registro":
+    st.title("Control de Ingresos y Gastos")# Título debe ir antes del formulario
+    formulario_de_registro()  # Llamamos a la función que maneja la lógica del formulario
+
+# ACA SE CREA LA TABLA CON LOS REGISTROS INTRODUCIDOS EN STREAMLIT (TABLA RESUMEN)
+# Mostrar los registros guardados (solo si existen)
+    if st.session_state.registros:
+      df = pd.DataFrame(st.session_state.registros)
+      st.subheader("Registros de transacciones")
+      st.dataframe(df) 
+
+# --- VER REGISTROS (Edición) ---
+elif pagina == "Ver Registros":
+    st.title("Editar Registro Existente")
+
+    # Cargar y actualizar el DataFrame desde Google Sheets
+    ver_registros()  # Esto actualiza st.session_state.df
+
+    df = st.session_state.df
+    worksheet = st.session_state.worksheet  # Accediendo a worksheet desde session_state
+
+    # Si hay registros, permitir seleccionar el ID
+    if not df.empty:
+        st.subheader("Paso 1: Selecciona el ID del registro a editar")
+
+        # Limpiar variables de edición si es necesario
+        if "registro_editado" in st.session_state:
+            del st.session_state["registro_editado"]
+
+        ids_disponibles = df["ID"].astype(int).sort_values().tolist()
+        min_id, max_id = min(ids_disponibles), max(ids_disponibles)
+
+        id_registro = st.number_input(
+            "Introduce manualmente el ID que deseas editar:",
+            min_value=min_id,
+            max_value=max_id,
+            step=1,
+            key="id_input"
+        )
+
+        # Buscar registro por ID
+        if id_registro in ids_disponibles:
+
+            # Asegúrate de convertir la columna TASA DE CAMBIO antes de usarla
+            df["TASA DE CAMBIO"] = df["TASA DE CAMBIO"].astype(float)
+
+            registro = df[df["ID"] == id_registro].iloc[0]
+            st.session_state.registro_editado = registro
+
+            # Asegúrate de convertir la columna TASA DE CAMBIO antes de usarla
+            df["TASA DE CAMBIO"] = df["TASA DE CAMBIO"].astype(float)
+
+            st.success(f"ID {id_registro} encontrado. Cargando formulario...")
+
+            # Pasamos al paso 2 (mostramos el formulario editable)
+            formulario_edicion(registro, worksheet, df)
+
+        else:
+            st.warning("El ID introducido no está en los registros.")
+    else:
+        st.warning("No hay registros para editar.")
 
 elif pagina == "Reporte de Ingresos":
     st.title("Reporte de Ingresos por Tipo de Pago")
     reporte_ingresos_por_fecha()
 
-
-elif pagina == "Reporte de Gastos":
-    st.title ("Reporte de Gastos")
+else: 
+    pagina == "Reporte de Gastos"
+    st.title("Reporte de Gastos por Tipo de Pago")
     reporte_de_gastos_por_fecha()
+
 
 #==============================================================================================================#
 

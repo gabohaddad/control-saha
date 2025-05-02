@@ -1,0 +1,66 @@
+import numpy as np
+from datetime import date
+import streamlit as st
+import pandas as pd
+
+def convertir_a_tipos_nativos(lista_valores):
+    return [
+        int(x) if isinstance(x, (np.int64, np.int32)) else
+        float(x) if isinstance(x, (np.float64, np.float32)) else
+        str(x) if not isinstance(x, (int, float, str)) else x
+        for x in lista_valores
+    ]
+
+def actualizar_datos_modificados(worksheet, df_actualizado, edit_id, fecha, categoria, subcategoria, responsable, descripcion, monto, tipo_pago, tasa_cambio):
+    
+    # Convertir fecha si viene como objeto date
+    if isinstance(fecha, date):
+        fecha = fecha.strftime('%d/%m/%Y')
+
+    # Validar monto como float
+    try:
+        monto = float(monto)
+    except ValueError:
+        st.error("El monto ingresado no es válido. Debe ser un número.")
+        return
+
+    # Leer datos actuales de la hoja
+    data_actual = worksheet.get_all_values()
+    df_actualizado = pd.DataFrame(data_actual[1:], columns=data_actual[0])
+
+    # Asegurar que 'ID' y 'MONTO' estén bien tipados
+    df_actualizado['ID'] = pd.to_numeric(df_actualizado['ID'], errors='coerce').fillna(0).astype(int)
+    df_actualizado['MONTO'] = pd.to_numeric(df_actualizado['MONTO'], errors='coerce').fillna(0.0).astype(float)
+
+    # Convertir edit_id a entero
+    edit_id = int(edit_id)
+
+    # Buscar el índice del registro a modificar
+    indice = df_actualizado[df_actualizado["ID"] == edit_id].index
+
+    if not indice.empty:
+        idx = indice[0]
+
+        # Actualizar valores en el DataFrame
+        df_actualizado.at[idx, 'Fecha'] = fecha
+        df_actualizado.at[idx, 'Categoría'] = categoria
+        df_actualizado.at[idx, 'Subcategoría'] = subcategoria
+        df_actualizado.at[idx, 'Responsable'] = responsable
+        df_actualizado.at[idx, 'Descripción'] = descripcion
+        df_actualizado.at[idx, 'Monto'] = monto
+        df_actualizado.at[idx, 'Tipo de Pago'] = tipo_pago
+        df_actualizado.at[idx, 'Tasa de Cambio'] = tasa_cambio
+
+        # Convertir la fila a tipos serializables nativos
+        fila_actualizacion = idx + 2  # Por encabezados
+        actualizaciones = convertir_a_tipos_nativos(df_actualizado.iloc[idx].tolist())
+
+        # Actualizar en Google Sheets
+        worksheet.update(f"A{fila_actualizacion}", [actualizaciones])
+
+        # Sincronizar en session_state
+        st.session_state.df = df_actualizado
+
+        st.success(f"¡El registro con ID {edit_id} se ha actualizado correctamente en Google Sheets!")
+    else:
+        st.error(f"No se encontró el registro con ID {edit_id}.")

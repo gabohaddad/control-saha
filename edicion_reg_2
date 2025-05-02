@@ -1,0 +1,142 @@
+#ESTE MODULO ES EL FORMATO QUE APARECE DEBAJO DEL DATA FRAME DE GOOGLE SHEET PARA REALIZAR LA EDICION DE 
+# LOS CAMPOS DEL REGISTRO SELECCIONADO
+
+    # Función para editar un registro específico
+def edicion_de_registro(id_registro):
+    #df, worksheet = cargar_datos()
+#----------------------------------------------
+      
+    df = st.session_state.df
+    worksheet = st.session_state.worksheet  # Necesario si vas a actualizar Google Sheets
+    
+    if df.empty:
+        st.warning("No hay registros disponibles para editar.")
+        return
+
+    df["ID"] = df["ID"].astype(int)  # Asegurar que los IDs sean enteros
+    min_id, max_id = df["ID"].min(), df["ID"].max()
+#------------------------------------------------------------------------------
+# 1️⃣ Limpiar campos si el flag de reseteo está activado
+    if st.session_state.get("reset_form", False):
+        st.session_state["id_input"] = min_id
+        st.session_state["fecha_input"] = datetime.today()
+        st.session_state["categoria_input"] = ""
+        st.session_state["descripcion_input"] = ""
+        st.session_state["monto_input"] = 0.0
+        st.session_state["subcategoria_input"] = ""
+        st.session_state["responsable_input"] = ""
+        st.session_state["tipo_pago_input"] = "USD"
+        st.session_state["tasa_cambio_input"] = 1.0
+        st.session_state["reset_form"] = False
+#-----------------------------------------------------------------------------
+
+    st.write("Número total de registros en el DataFrame:", len(df)) 
+
+    
+# Verificamos si el ID está en el rango
+    if id_registro < min_id or id_registro > max_id:
+        st.error("El ID seleccionado no existe.")
+        return
+    
+    # UNA VEZ SELECCIONADO EL ID Y VERIFICADO QUE EXISTE A CONTINUACION SE DESARROLLA OTRO
+    # FORMULARIO
+    # El df loc selecoiona todos los datos de ese registro y rellena los campos
+    edit_index = df[df["ID"] == id_registro].index[0]
+    registro_a_editar = df.loc[edit_index]
+
+    fecha = st.date_input("Fecha de la transacción", value=pd.to_datetime(registro_a_editar["FECHA"]).date())
+#----------------------------------------------------------------------------------------
+# Esta seccion impide que se cambie de ingreso a gasto o viceversa para editar
+# da un warning de eliminar el registro
+    categoria_original = registro_a_editar["CATEGORIA"].strip().capitalize()
+    
+    st.session_state.edicion_activa = categoria_original  # Guarda la categoría original
+
+    categoria = st.selectbox("Selecciona la categoría", ["Ingreso", "Gasto"], index=["Ingreso", "Gasto"].index(categoria_original))
+    
+    
+# Si el usuario intenta cambiar de Ingreso a Gasto o viceversa
+    if st.session_state.edicion_activa != categoria:
+        st.warning("No puedes cambiar de Ingreso a Gasto o viceversa. Si necesitas corregirlo, elimina este registro y crea uno nuevo.")
+        st.stop()  # Detiene la ejecución del formulario
+#-----------------------------------------------------------------------------------
+    #if st.session_state.get("limpiar",False):
+        #limpiar_campos()
+       # return # este return 
+
+
+    subcategorias = {
+        "Ingreso": ["","Ventas Saha", "Ventas Netlink", "Alquiler", "Aporte de Capital", "Otros Ingresos"]}
+
+    subcategorias_gasto_fijo ={
+        "Gasto fijo": ["","Alquiler", "Nómina", "Servicios", "Gas", "Piscina", "Contadora", "Mantenimiento"]}
+
+    subcategorias_gasto_variable={
+        "Gasto variable": ["","Publicidad", "Comisiones", "Transporte","Comida","SEMAT","IVA","ISLR","IVSS","FAO","Pensiones","Patente","Otros"]
+    }
+
+    if categoria == "Ingreso":
+        monto = max(0.01, float(registro_a_editar["MONTO"]))
+        #monto = st.number_input("Monto", min_value=0.01, step=0.01, value=monto)
+        subcategoria = st.selectbox("Selecciona la subcategoría de ingreso", subcategorias["Ingreso"], index=subcategorias["Ingreso"].index(registro_a_editar["SUB-CATEGORIA"]))
+        responsable = st.selectbox("¿A quién corresponde el ingreso?", ["SAHA", "AMINE", "Gabriel"], index=["SAHA", "AMINE", "Gabriel"].index(registro_a_editar["RESPONSABLE"]))
+    
+    else:
+        subcategoria_tipo = st.selectbox("Selecciona el tipo de gasto", ["Gasto fijo", "Gasto variable"])
+        if subcategoria_tipo == "Gasto fijo": 
+
+             subcategoria = st.selectbox(f"Selecciona la subcategoría de {subcategoria_tipo}", subcategorias_gasto_fijo["Gasto fijo"], index=subcategorias_gasto_fijo["Gasto fijo"].index(registro_a_editar["SUB-CATEGORIA"]))
+                         
+        elif subcategoria_tipo == "Gasto variable":
+             subcategoria = st.selectbox(f"Selecciona la subcategoría de {subcategoria_tipo}", subcategorias_gasto_variable["Gasto variable"], index=subcategorias_gasto_variable["Gasto variable"].index(registro_a_editar["SUB-CATEGORIA"]))
+             
+
+        responsable = st.selectbox("¿A quién corresponde el gasto?", ["SAHA", "AMINE", "Gabriel", "NETLINK"], index=["SAHA", "AMINE", "Gabriel", "NETLINK"].index(registro_a_editar["RESPONSABLE"]))
+        
+        monto = min(-0.01, float(registro_a_editar["MONTO"]))
+        #monto = st.number_input("Monto", min_value=-1000000.0, max_value=-0.01, step=0.01, value=monto)
+    
+    
+    descripcion = st.text_input("Descripción de la transacción", value=registro_a_editar["DESCRIPCION"])
+    monto = st.number_input("Monto", min_value=0.01, step=0.01, value=monto)
+    tipo_pago = st.selectbox("Selecciona el tipo de pago", ["Dólares", "Zelle", "BSF", "BSF Transfer"], index=["Dólares", "Zelle", "BSF", "BSF Transfer"].index(registro_a_editar["TIPO DE PAGO"]))
+    tasa_cambio = st.text_input("Tasa de cambio del día (si aplica)", value=registro_a_editar["TASA DE CAMBIO"] if tipo_pago == "BSF" else "")
+   #-------------------------------------------------------------------------------------------------------------
+   # ESTE BOTON YA ME ESTA ACTUALIZANDO LA DATA EN EL DATA FRAME Y EN GOOGLE SHEET YA QUE DA LA INSTRUCCION DE
+   # IR A ACTUALIZAR DATOS MODIFICADOS
+    if st.button("Actualizar registro"):
+        df.at[edit_index, "FECHA"] = fecha
+        df.at[edit_index, "CATEGORIA"] = categoria
+        df.at[edit_index, "DESCRIPCION"] = descripcion
+        df.at[edit_index, "MONTO"] = monto
+        df.at[edit_index, "SUB-CATEGORIA"] = subcategoria
+        df.at[edit_index, "RESPONSABLE"] = responsable
+        df.at[edit_index, "TIPO DE PAGO"] = tipo_pago
+        if tipo_pago == "BSF":
+            df.at[edit_index, "TASA DE CAMBIO"] = tasa_cambio
+
+        actualizar_datos_modificado(worksheet, df, id_registro)
+
+        # Actualizar en Google Sheets
+    
+    # Leer los datos de Google Sheets después de la actualización
+        data_actual = worksheet.get_all_values()
+        df_actualizado = pd.DataFrame(data_actual[1:], columns=data_actual[0])
+
+    # Sincronizar el DataFrame local con los datos de Google Sheets
+        st.session_state.df = df_actualizado
+        st.success("Registro actualizado correctamente.")
+
+        # Limpiar ID del input y campos del formulario al guardar
+        # Limpiar el ID ingresado y reiniciar formulario
+        #st.session_state["id_input"] = min_id  # o usa None si prefieres dejarlo en blanco
+        
+
+       # ✅ Activar el reseteo y recargar
+        st.session_state["reset_form"] = True
+        st.rerun()  # Esto volverá a ejecutar el script, lo que puede ayudar a actualizar la UI si es necesario
+
+# ✅ Limpia edicion_activa
+    #if "edicion_activa" in st.session_state:
+        #del st.session_state.edicion_activa
+        
