@@ -5,6 +5,8 @@ import pandas as pd
 from datetime import datetime, date
 import time  # Importar el módulo time
 import numpy as np
+import unicodedata # para estandarizar formato de titulo de columnas
+
 
 #from google_sheets import obtener_registros
 from google_sheets import cargar_registros_a_google_sheets
@@ -350,78 +352,98 @@ def limpiar_campos():
     st.session_state.limpiar = False
     st.rerun()
 #---------------------------------------------------------------------------------
+# Funcion para estandarizar columnas de los df
+
+def estandarizar_columnas(df):
+    df.columns = [
+        unicodedata.normalize('NFKD', col).encode('ascii', 'ignore').decode('utf-8')
+        for col in df.columns
+    ]
+    df.columns = df.columns.str.strip().str.upper()
+    return df
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# carga un df de las categorias tipo y subcategorias de google sheet
+
+def cargar_subcategorias(sheet):
+    data = sheet.worksheet("Subcategorias").get_all_records()
+    df_subs = pd.DataFrame(data)
+    df_subs = estandarizar_columnas(df_subs)  # Estandarizar columnas
+    return df_subs
+
+    
+
+def cargar_responsables(sheet):
+    data = sheet.worksheet("Responsables").get_all_records()
+    responsables_df = pd.DataFrame(data)
+    responsables_df = estandarizar_columnas(responsables_df)  # Estandarizar columnas
+    return responsables_df
+#-----------------------------------------------------------------------
 
 # Interfaz de usuario SECCION DONDE SE CARGAN LOS DATOS (WIDGETS) (formulario)
+# creacion de diccionarios dinamicos, subcategorias, responsables 
 
-def formulario_de_registro():
+def formulario_de_registros(sheet):
 
-
-    # 🔄 LIMPIEZA DEL FORMULARIO SI LA BANDERA 'limpiar' ESTÁ ACTIVA
-    if st.session_state.get("limpiar",False):
-        limpiar_campos()
-        return # este return detiene que se sigan crando widgets antes de limpiar los campos
-        
-    # Ingreso de datos
-    fecha = st.date_input("Fecha de la transacción", value=datetime.today().date(), key="fecha")
     
-    # Convertir la fecha a formato "día/mes/año"
+    df_subs = cargar_subcategorias(sheet)  # Cargar subcategorías
+
+    if st.session_state.get("limpiar", False):
+        limpiar_campos()
+        return
+
+    fecha = st.date_input("Fecha de la transacción", value=datetime.today().date(), key="fecha")
     fecha_formateada = fecha.strftime("%d/%m/%Y")
 
-    categoria = st.selectbox("Selecciona la categoría", ["","Ingreso", "Gasto"], key="categoria")
-
-    # Subcategorías para ingresos 
-    subcategorias_ingreso = ["","Ventas Saha", "Ventas Netlink", "Alquiler", "Aporte de Capital",
-     
-                                    "Otros Ingresos"]
-    
-    # Subcategorías para gastos
-    subcategorias_gasto_fijo = ["","Alquiler", "Nómina", "Servicios", "Gas", "Piscina", "Contadora","Mantenimiento"]
-    subcategorias_gasto_variable = ["","Publicidad", "Comisiones", "Transporte", "Comida","SEMAT","IVA","ISLR","IVSS","FAO","Pensiones","Patente","Otros"]
-
-    
+    categoria = st.selectbox("Selecciona la categoría", ["", "Ingreso", "Gasto"], key="categoria")
     subcategoria = None
+    tipo_gasto = None
     responsable = None
 
-    if categoria == "Gasto":
-        subcategoria_tipo = st.selectbox("Selecciona el tipo de gasto", ["","Gasto fijo", "Gasto variable"], key="subcategoria_tipo")
-        
-        if subcategoria_tipo == "Gasto fijo":
-            subcategoria = st.selectbox("Selecciona la subcategoría de gasto fijo", subcategorias_gasto_fijo, key="subcategoria_fijo")
-        elif subcategoria_tipo == "Gasto variable":
-            subcategoria = st.selectbox("Selecciona la subcategoría de gasto variable", subcategorias_gasto_variable, key="subcategoria_variable")
-        
-        # Selección del responsable
-        responsable = st.selectbox("¿A quién corresponde el gasto?", ["","SAHA", "AMINE", "Gabriel", "NETLINK"], key="responsable")
+    # carga la lista de responsables del google sheet y crea el diccionario en el df 
+    responsables_df = cargar_responsables(sheet)
+    
+    lista_responsables = responsables_df["RESPONSABLE"].dropna().tolist()
 
-    elif categoria == "Ingreso":
-        subcategoria = st.selectbox("Selecciona la subcategoría de ingreso", 
-                                    subcategorias_ingreso,
-                                    index=0, key="subcategoria_ingreso")
+
+    if categoria == "Ingreso":
+        subcategorias_disponibles = df_subs[
+            (df_subs["CATEGORIA"] == "Ingreso")
+        ]["SUBCATEGORIA"].unique().tolist()
         
-        responsable = st.selectbox("¿A quién corresponde el ingreso?", ["","SAHA", "AMINE", "Gabriel"], key="responsable_ingreso")
+        subcategoria = st.selectbox("Selecciona la subcategoría de ingreso", ["" ] + subcategorias_disponibles, key="sub_ingreso")
+        responsable = st.selectbox("¿A quién corresponde el ingreso?", [""] + lista_responsables, key="responsable_ingreso")
+    
+    elif categoria == "Gasto":
+        tipo_gasto = st.selectbox("Selecciona el tipo de gasto", ["", "Gasto Fijo", "Gasto Variable"], key="tipo_gasto")
+
+        if tipo_gasto:
+            subcategorias_disponibles = df_subs[
+                (df_subs["CATEGORIA"] == "Gasto") &
+                (df_subs["TIPO"] == tipo_gasto)
+            ]["SUBCATEGORIA"].unique().tolist()
+            
+            subcategoria = st.selectbox("Selecciona la subcategoría", ["" ] + subcategorias_disponibles, key="sub_gasto")
+            responsable = st.selectbox("¿A quién corresponde el gasto?", [""] + lista_responsables, key="responsable_gasto")
 
     descripcion = st.text_input("Descripción", value=st.session_state.get("descripcion", ""), key="descripcion")
 
-    # Si no existe un valor inicial para 'monto', lo establecemos en 0
     if "monto" not in st.session_state:
         st.session_state.monto = 0.0
+    monto = st.number_input("Ingrese el monto", step=0.01, format="%.2f", key="monto")
 
-    monto = st.number_input("Ingrese el monto",  step=0.01, format="%.2f", key="monto")
-    
-    # Opciones de pago
     tipo_pago = st.selectbox("Selecciona el tipo de pago", ["Dólares", "Zelle", "BSF"], key="tipo_pago")
-
-    # Mostrar input solo si el tipo de pago es BSF
     if tipo_pago == "BSF":
         tasa_cambio = st.number_input("Tasa de cambio", min_value=0.0, format="%.2f")
         if tasa_cambio == 0.0:
             st.warning("⚠️ Para pagos en BSF debes ingresar la tasa de cambio.")
     else:
-        tasa_cambio = 1.0  # Se fija automáticamente si no es BSF
-        st.session_state.tasa_cambio = tasa_cambio  # Asegurar que session_state refleje este valor
+        tasa_cambio = 1.0
+        st.session_state.tasa_cambio = tasa_cambio
 
- #-------------------------------------------------------------------------------------------   
- # Botón para agregar el registro
+    # Aquí puedes colocar el botón para guardar y la lógica adicional...
+#--------------------------------------------------------------------------------------
+# Botón para agregar el registro
 
     if st.button("Agregar registro"):
 
@@ -442,7 +464,7 @@ def formulario_de_registro():
             st.session_state.limpiar = True
 
         else:
-            st.warning("Por favor, completa todos los campos antes de agregar el registro.")    
+            st.warning("Por favor, completa todos los campos antes de agregar el registro.")  
 
 #-----------------------------------------------------------------------------------------------------
 # CREACION DEL REPORTE DE GASTOS POR CATEGORIAS
@@ -677,30 +699,33 @@ def reporte_de_gastos_por_fecha():
         st.warning("⚠️ Por favor, selecciona un rango de fechas válido.")
 
 #====================================================================================
-# diccionario de subcategrias de gastos
-subcategorias_fijas = ["Alquiler", "Nómina", "Servicios", "Gas", "Piscina", 
-                               "Contadora", "Mantenimiento"]
-subcategorias_variables = ["Publicidad", "Comisiones", "Transporte", "Comida",
-                           "SEMAT","IVA","ISLR","IVSS","FAO","Pensiones","Patente","Otros"]
+# Función para estandarizar columnas de los df
+def estandarizar_columnas(df):
+    df.columns = [
+        unicodedata.normalize('NFKD', col).encode('ascii', 'ignore').decode('utf-8')
+        for col in df.columns
+    ]
+    df.columns = df.columns.str.strip().str.upper()
+    return df
 
-#------------------------------------------------------------------------------
-# este modulo junto con los diccionarios de arriba de las subcategorias de gastos
-# me permite detectar que tipo de subcategoria es fijo o variable para luego abrir
-# el diccionario correpondiente
+#+====================================================================================
 
-def detectar_tipo_desde_subcategoria(subcat):
-    if subcat in subcategorias_fijas:
-        return "Gasto fijo"
-    elif subcat in subcategorias_variables:
-        return "Gasto variable"
-    else:
-        return "Otro"
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-#========================================================================================
 # Función para mostrar el formulario de edición
-def formulario_edicion(registro, worksheet, df):
+def formulario_edicion(registro, worksheet, df,sheet):
     st.subheader("Formulario de Edición")
 
+   # Cargar subcategorías y responsables desde Google Sheets
+    subcategorias_df = cargar_subcategorias(sheet)
+    responsables_df = cargar_responsables(sheet)
+
+    
+    # Convertir a listas simples
+    
+    subcategoria = subcategorias_df["SUBCATEGORIA"].tolist()
+    responsables = responsables_df["RESPONSABLE"].tolist()
+   
     # Mostrar los campos con los valores actuales del registro
     try:
         fecha_obj = datetime.strptime(registro["FECHA"], "%d/%m/%Y").date()
@@ -709,80 +734,60 @@ def formulario_edicion(registro, worksheet, df):
 
     fecha = st.date_input("Fecha de la transacción", value=fecha_obj, key="fecha")
 
-
     
-    # Categoría
-    categoria = st.selectbox("Selecciona la categoría", ["Ingreso", "Gasto"], index=["Ingreso", "Gasto"].index(registro["CATEGORIA"]), key="categoria")
-    # Subcategorías para ingresos 
-    subcategorias_ingreso = ["","Ventas Saha", "Ventas Netlink", "Alquiler", "Aporte de Capital",
-     
-                                    "Otros Ingresos"]
+    categoria = st.selectbox("Categoria", ["Ingreso", "Gasto"], index=["Ingreso", "Gasto"].index(registro["CATEGORIA"]))
     
-    # Subcategorías para gastos
-    subcategorias_gasto_fijo = ["","Alquiler", "Nómina", "Servicios", "Gas", "Piscina", "Contadora","Mantenimiento"]
-    subcategorias_gasto_variable = ["","Publicidad", "Comisiones", "Transporte", "Comida","SEMAT","IVA","ISLR","IVSS","FAO","Pensiones","Patente","Otros"]
 
-    subcategoria = None
-    responsable = None
-    subcategoria_tipo = None 
-
-    # Subcategorías según la categoría (Ingreso o Gasto)
+    # Tipo de Gasto (solo si es "Gasto")
+   
     if categoria == "Gasto":
-        subcat_actual = registro.get("SUB-CATEGORIA","")
+        
+        subcategoria_actual = registro.get("SUB-CATEGORIA", "")
 
-        # Detectar tipo de gasto automáticamente desde subcategoría
-        if subcat_actual in subcategorias_gasto_fijo:
-            tipo_gasto_default = "Gasto fijo"
-        elif subcat_actual in subcategorias_gasto_variable:
-            tipo_gasto_default = "Gasto variable"
-        else:
-            tipo_gasto_default = "Gasto fijo"  # fallback por defecto
+                
+        # Detectar tipo de gasto desde la subcategoría
+        tipo_detectado = subcategorias_df.loc[
+            subcategorias_df["SUBCATEGORIA"] == subcategoria_actual, "TIPO"
+        ].values
 
-        subcategoria_tipo = st.selectbox(
-            "Selecciona el tipo de gasto",
-            ["Gasto fijo", "Gasto variable"],
-            index=["Gasto fijo", "Gasto variable"].index(tipo_gasto_default),
-            key=f"subcategoria_tipo_{registro['ID']}"
+        tipo_gasto = tipo_detectado[0] if len(tipo_detectado) > 0 else "Fijo"
+        
+        # Selectbox para tipo de gasto (ya deducido)
+        tipo_gasto = st.selectbox(
+            "Tipo de Gasto",
+            ["Gasto Fijo", "Gasto Variable"],
+            index=["Gasto Fijo", "Gasto Variable"].index(tipo_gasto)
         )
-        
-        
-        if subcategoria_tipo == "Gasto fijo":
-            subcategoria_tipo = st.selectbox(
-                "Selecciona la subcategoría de gasto fijo", 
-                subcategorias_gasto_fijo, 
-                index=subcategorias_gasto_fijo.index(subcat_actual) if subcat_actual in subcategorias_gasto_fijo else 0,
-                key="subcategoria_fijo"
-            )
 
-            subcategoria = subcategoria_tipo  # <-- AQUÍ estás asignando la subcategoría real
+    # Filtrar subcategorías según tipo y categoría
+        subcats_filtradas = subcategorias_df[
+            (subcategorias_df["CATEGORIA"] == "Gasto") & 
+            (subcategorias_df["TIPO"] == tipo_gasto)
+        ]
+        subcategorias = subcats_filtradas["SUBCATEGORIA"].unique().tolist()
 
-        else:
-            subcategoria = st.selectbox(
-                "Selecciona la subcategoría de gasto variable", 
-                subcategorias_gasto_variable, 
-                index=subcategorias_gasto_variable.index(subcat_actual) if subcat_actual in subcategorias_gasto_variable else 0,
-                key="subcategoria_variable"
-            )
-            
-            subcategoria = subcategoria_tipo  # <-- AQUÍ estás asignando la subcategoría real
-
-       
-    elif categoria == "Ingreso":
+        # Selectbox para subcategoría, con valor actual preseleccionado
         subcategoria = st.selectbox(
-            "Selecciona la subcategoría de ingreso", 
-            subcategorias_ingreso, 
-            index=subcategorias_ingreso.index(registro["SUB-CATEGORIA"]) if registro["SUB-CATEGORIA"] in subcategorias_ingreso else 0,
-            key="subcategoria_ingreso"
+            "Subcategoría",
+            subcategorias,
+            index=subcategorias.index(subcategoria_actual) if subcategoria_actual in subcategorias else 0
+        )
+    else:
+        tipo_gasto = None
+        subcategoria = st.selectbox(
+            "Subcategoría",
+            subcategorias_df[subcategorias_df["CATEGORIA"] == categoria]["SUBCATEGORIA"].unique().tolist(),
+            index=0
         )
 
     # Responsable
+    responsables = responsables_df["RESPONSABLE"].tolist()
     responsable = st.selectbox(
-        "¿A quién corresponde?", 
-        ["SAHA", "AMINE", "Gabriel", "NETLINK"], 
-        index=["SAHA", "AMINE", "Gabriel", "NETLINK"].index(registro["RESPONSABLE"]), 
-        key="responsable"
+        "Responsable",
+        responsables,
+        index=responsables.index(registro["RESPONSABLE"]) if registro["RESPONSABLE"] in responsables else 0
     )
-    
+
     # Descripción
     descripcion = st.text_input("Descripción", value=registro["DESCRIPCION"], key="descripcion")
 
@@ -899,7 +904,18 @@ pagina = st.sidebar.radio("Selecciona una página", ["Formulario de Registro", "
 # --- Control de flujo según la selección de la barra lateral ---
 if pagina == "Formulario de Registro":
     st.title("Control de Ingresos y Gastos")# Título debe ir antes del formulario
-    formulario_de_registro()  # Llamamos a la función que maneja la lógica del formulario
+    # 1. Autenticación con Google Sheets
+    cliente = autenticacion_google_sheets()
+
+    # 2. Abrir el archivo de Google Sheets por nombre
+    sheet = cliente.open("BD DE REGISTROS FINANCIEROS")
+
+    # 3. Llamar al formulario y pasarle el sheet
+    formulario_de_registros(sheet)
+
+
+
+    #formulario_de_registros()  # Llamamos a la función que maneja la lógica del formulario
 
 # ACA SE CREA LA TABLA CON LOS REGISTROS INTRODUCIDOS EN STREAMLIT (TABLA RESUMEN)
 # Mostrar los registros guardados (solo si existen)
@@ -917,6 +933,10 @@ elif pagina == "Ver Registros":
 
     df = st.session_state.df
     worksheet = st.session_state.worksheet  # Accediendo a worksheet desde session_state
+
+    # Definir 'sheet' antes de pasarla a formulario_edicion
+    cliente = autenticacion_google_sheets()
+    sheet = cliente.open("BD DE REGISTROS FINANCIEROS")
 
     # Si hay registros, permitir seleccionar el ID
     if not df.empty:
@@ -952,7 +972,7 @@ elif pagina == "Ver Registros":
             st.success(f"ID {id_registro} encontrado. Cargando formulario...")
 
             # Pasamos al paso 2 (mostramos el formulario editable)
-            formulario_edicion(registro, worksheet, df)
+            formulario_edicion(registro, worksheet,df,sheet)
 
         else:
             st.warning("El ID introducido no está en los registros.")
