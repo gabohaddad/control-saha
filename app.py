@@ -403,11 +403,12 @@ def limpiar_campos():
         "monto", "tipo_pago", "tasa_cambio"
     ]
     for key in keys_a_borrar:
-        if key in st.session_state:
+        if key == "descripcion":
+            st.session_state[key] = ""
+        elif key in st.session_state:
             del st.session_state[key]
     st.session_state.limpiar = False
     st.rerun()
-#---------------------------------------------------------------------------------
 
 #---------------------------------------------------------------------------------------
 
@@ -458,7 +459,8 @@ def formulario_de_registros(sheet):
             subcategoria = st.selectbox("Selecciona la subcategoría", ["" ] + subcategorias_disponibles, key="sub_gasto")
             responsable = st.selectbox("¿A quién corresponde el gasto?", [""] + lista_responsables, key="responsable_gasto")
 
-    descripcion = st.text_input("Descripción", value=st.session_state.get("descripcion", ""), key="descripcion")
+    descripcion = st.text_input("Descripción", key="descripcion")
+
 
     if "monto" not in st.session_state:
         st.session_state.monto = 0.0
@@ -936,33 +938,48 @@ def formulario_edicion(registro, worksheet, df,sheet):
 # BOTON PARA ELIMINAR EL REGISTRO
     st.subheader("Eliminar un registro")
 
-    if not df.empty:  
-       id_eliminar = st.selectbox("Selecciona el ID a eliminar:", df["ID"].tolist(), key="select_id_eliminar")
-        
-       if st.button("❌ Eliminar seleccionado"):
-            # Verificar si el ID existe en el DataFrame
+    if not df.empty:
+        id_eliminar = st.text_input("Ingresa el ID a eliminar:", key="input_id_eliminar")
+
+        if id_eliminar:
+            try:
+                id_eliminar = int(id_eliminar)
+            except ValueError:
+                st.warning("Por favor ingresa un número válido como ID.")
+                st.stop()
+
             if id_eliminar in df["ID"].values:
-                df = df[df["ID"] != id_eliminar]  # Eliminar el registro con ese ID
-                df.reset_index(drop=True, inplace=True)  # Resetear índices
+                if st.button("❌ Eliminar seleccionado"):
+                    # 1. Eliminar el registro
+                    df = df[df["ID"] != id_eliminar].copy()
 
-                df['ID'] = range(1, len(df) + 1)  # Reasignar IDs comenzando desde 1
+                    # 2. Resetear índices internos
+                    df.reset_index(drop=True, inplace=True)
 
-                # Actualizar Google Sheets sin dejar espacios vacíos
-                worksheet.clear()
-                worksheet.update([df.columns.values.tolist()] + df.values.tolist())
+                        # 3. Reasignar valores a la columna "ID"
+                    df["ID"] = range(1, len(df) + 1)
 
-                # ✅ Limpia edicion_activa
-                if "edicion_activa" in st.session_state:
-                    del st.session_state.edicion_activa
+                    # 4. Actualizar hoja si no está vacía
+                    if not df.empty:
+                        df = df.fillna("")
+                        worksheet.clear()
+                        worksheet.update([df.columns.values.tolist()] + df.values.tolist())
+                    else:
+                        st.warning("El DataFrame está vacío. No se actualizará la hoja para evitar borrar los datos.")
 
+                    # 5. Limpiar sesión
+                    if "edicion_activa" in st.session_state:
+                        del st.session_state.edicion_activa
+
+                    # 6. Mensaje de éxito y recarga
                     st.success(f"Registro con ID {id_eliminar} eliminado con éxito.")
-
-
-                st.rerun()  # Recargar la app
-            else:
-                st.warning("El ID seleccionado no existe en la base de datos.")
+                    st.session_state["df"] = df
+                    st.rerun()
+        else:
+            st.warning("El ID ingresado no existe en la base de datos.")
     else:
-        st.warning("No hay registros disponibles para editar.")
+        st.warning("No hay registros disponibles para eliminar.")
+
 
 #---------------------------------------------------------------------------------------------------
 
