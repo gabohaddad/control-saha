@@ -72,24 +72,24 @@ def cargar_datos_auxiliares(sheet):
 # Obtener la ruta del archivo JSON desde la variable de entorno .env
 
 def autenticacion_google_sheets():
+    SCOPES = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
 
-    SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-
-    # Detectar si estamos en Streamlit Cloud usando la variable de entorno 'STREAMLIT_SERVER_PORT' (o similar)
-    if "STREAMLIT_SERVER_PORT" in os.environ:
-        # Estamos en Streamlit Cloud, cargar credenciales desde st.secrets
-        info = st.secrets["google_service_account"]
-        credentials = Credentials.from_service_account_info(info, scopes=SCOPES)
-        st.write("Autenticado usando st.secrets (Streamlit Cloud)")
+    if "IS_STREAMLIT_CLOUD" in os.environ:
+        # En Streamlit Cloud, usa st.secrets para cargar credenciales
+        creds_info = st.secrets["google_service_account"]
+        credentials = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
     else:
-        # Estamos en local, usar dotenv para cargar variable de entorno con ruta al JSON
-        from dotenv import load_dotenv
+        # En local, carga el .env para obtener la ruta del archivo JSON
         load_dotenv()
-        ruta_credenciales = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        if ruta_credenciales is None or ruta_credenciales.strip() == "":
-            raise ValueError("No se encontró la ruta GOOGLE_APPLICATION_CREDENTIALS en .env")
-        credentials = Credentials.from_service_account_file(ruta_credenciales, scopes=SCOPES)
-        st.write("Autenticado usando archivo local (.env)")
+        cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
+        if not cred_path or cred_path.strip() == "":
+            raise ValueError("No se encontró la ruta GOOGLE_APPLICATION_CREDENTIALS en .env o está vacía.")
+
+        credentials = Credentials.from_service_account_file(cred_path, scopes=SCOPES)
 
     cliente = gspread.authorize(credentials)
     return cliente
