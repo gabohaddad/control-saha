@@ -72,39 +72,20 @@ def cargar_datos_auxiliares(sheet):
 # Obtener la ruta del archivo JSON desde la variable de entorno .env
 
 def autenticacion_google_sheets():
-    st.write("=== Variables de entorno actuales ===")
-    for k, v in os.environ.items():
-        st.write(f"{k}: {v}")
-    
-    if "IS_STREAMLIT_CLOUD" in os.environ:
-        st.write("Corriendo en Streamlit Cloud")
-        creds_info = st.secrets.get("google_service_account")
-        st.write("Credenciales de st.secrets cargadas:", bool(creds_info))
-        if not creds_info:
-            st.error("No se encontraron las credenciales en st.secrets['google_service_account']")
-            st.stop()
-        SCOPES = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        credentials = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
-        cliente = gspread.authorize(credentials)
-        return cliente
-    else:
-        st.write("Corriendo localmente")
-        load_dotenv()
-        cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        st.write(f"Ruta de credenciales local: {cred_path}")
-        if not cred_path or cred_path.strip() == "":
-            st.error("No se encontró la ruta GOOGLE_APPLICATION_CREDENTIALS en .env o está vacía.")
-            st.stop()
-        SCOPES = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        credentials = Credentials.from_service_account_file(cred_path, scopes=SCOPES)
-        cliente = gspread.authorize(credentials)
-        return cliente
+    # Obtén las credenciales desde st.secrets en forma de diccionario
+    info_cred = st.secrets["google_service_account"]
+
+    # Google espera que private_key tenga saltos de línea reales, no \n literales
+    # Streamlit guarda los saltos de línea como reales, pero si tienes problemas usa replace:
+    # info_cred["private_key"] = info_cred["private_key"].replace('\\n', '\n')
+
+    # Crea el objeto Credentials a partir del diccionario
+    SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    credentials = Credentials.from_service_account_info(info_cred, scopes=SCOPES)
+
+    # Autoriza cliente gspread
+    cliente = gspread.authorize(credentials)
+
 #-----------------------------------------------------------------------------------------
 # --- Función para cargar los datos de Google Sheets en un dataframe---
  
