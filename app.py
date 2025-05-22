@@ -73,33 +73,26 @@ def cargar_datos_auxiliares(sheet):
 
 def autenticacion_google_sheets():
 
-    load_dotenv()
-    GOOGLE_APPLICATION_CREDENTIALS = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-
-    if GOOGLE_APPLICATION_CREDENTIALS:
-        print(f"La ruta de las credenciales es: {GOOGLE_APPLICATION_CREDENTIALS}")
-    else:
-        print("La variable de entorno 'GOOGLE_APPLICATION_CREDENTIALS' no se ha cargado correctamente.")
-    
-    if GOOGLE_APPLICATION_CREDENTIALS is None or GOOGLE_APPLICATION_CREDENTIALS.strip() == "":
-        raise ValueError("No se encontró la clave en la variable de entorno o está vacía.")
-
-    # Define el alcance de la autenticación
-
     SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    
-    # Cargar las credenciales desde el archivo JSON
 
-    # ESTOS SON LOS CREDEDENCIALES QUE SE GENERARON EN GOOGLE CLOUD PARA ESTE PROYECTO
-    credentials = Credentials.from_service_account_file(GOOGLE_APPLICATION_CREDENTIALS,scopes=SCOPES)
-    #credentials = Credentials.from_service_account_file("C:/Users/USUARIO/Documents/coastal-range-452621-e4-14db891d7262.json",scopes=SCOPES)
-    
-    
-    # Autenticar y obtener el cliente de Google Sheets
+    # Detectar si estamos en Streamlit Cloud usando la variable de entorno 'STREAMLIT_SERVER_PORT' (o similar)
+    if "STREAMLIT_SERVER_PORT" in os.environ:
+        # Estamos en Streamlit Cloud, cargar credenciales desde st.secrets
+        info = st.secrets["google_service_account"]
+        credentials = Credentials.from_service_account_info(info, scopes=SCOPES)
+        st.write("Autenticado usando st.secrets (Streamlit Cloud)")
+    else:
+        # Estamos en local, usar dotenv para cargar variable de entorno con ruta al JSON
+        from dotenv import load_dotenv
+        load_dotenv()
+        ruta_credenciales = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        if ruta_credenciales is None or ruta_credenciales.strip() == "":
+            raise ValueError("No se encontró la ruta GOOGLE_APPLICATION_CREDENTIALS en .env")
+        credentials = Credentials.from_service_account_file(ruta_credenciales, scopes=SCOPES)
+        st.write("Autenticado usando archivo local (.env)")
+
     cliente = gspread.authorize(credentials)
-    
     return cliente
-   
 #-----------------------------------------------------------------------------------------
 # --- Función para cargar los datos de Google Sheets en un dataframe---
  
