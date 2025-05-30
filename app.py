@@ -68,23 +68,37 @@ def cargar_datos_auxiliares(sheet):
     if "cuentas" not in st.session_state:
         st.session_state.cuentas = cargar_cuentas(sheet)
 #----------------------------------------------------------------------------------------------
-
 # Obtener la ruta del archivo JSON desde la variable de entorno .env
 
 def autenticacion_google_sheets():
-    # Obtén las credenciales desde st.secrets en forma de diccionario
-    info_cred = st.secrets["google_service_account"]
 
-    # Google espera que private_key tenga saltos de línea reales, no \n literales
-    # Streamlit guarda los saltos de línea como reales, pero si tienes problemas usa replace:
-    # info_cred["private_key"] = info_cred["private_key"].replace('\\n', '\n')
+    load_dotenv()
+    GOOGLE_APPLICATION_CREDENTIALS = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
 
-    # Crea el objeto Credentials a partir del diccionario
+    if GOOGLE_APPLICATION_CREDENTIALS:
+        print(f"La ruta de las credenciales es: {GOOGLE_APPLICATION_CREDENTIALS}")
+    else:
+        print("La variable de entorno 'GOOGLE_APPLICATION_CREDENTIALS' no se ha cargado correctamente.")
+    
+    if GOOGLE_APPLICATION_CREDENTIALS is None or GOOGLE_APPLICATION_CREDENTIALS.strip() == "":
+        raise ValueError("No se encontró la clave en la variable de entorno o está vacía.")
+
+    # Define el alcance de la autenticación
+
     SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    credentials = Credentials.from_service_account_info(info_cred, scopes=SCOPES)
+    
+    # Cargar las credenciales desde el archivo JSON
 
-    # Autoriza cliente gspread
+    # ESTOS SON LOS CREDEDENCIALES QUE SE GENERARON EN GOOGLE CLOUD PARA ESTE PROYECTO
+    credentials = Credentials.from_service_account_file(GOOGLE_APPLICATION_CREDENTIALS,scopes=SCOPES)
+    #credentials = Credentials.from_service_account_file("C:/Users/USUARIO/Documents/coastal-range-452621-e4-14db891d7262.json",scopes=SCOPES)
+    
+    
+    # Autenticar y obtener el cliente de Google Sheets
     cliente = gspread.authorize(credentials)
+    
+    return cliente
+
 
 #-----------------------------------------------------------------------------------------
 # --- Función para cargar los datos de Google Sheets en un dataframe---
@@ -439,7 +453,7 @@ def formulario_de_registros(sheet):
         if tipo_gasto:
             subcategorias_disponibles = df_subs[
                 (df_subs["CATEGORIA"] == "Gasto") &
-                (df_subs["TIPO"] == tipo_gasto)
+                (df_subs["TIPO DE GASTO"] == tipo_gasto)
             ]["SUBCATEGORIA"].unique().tolist()
             
             subcategoria = st.selectbox("Selecciona la subcategoría", ["" ] + subcategorias_disponibles, key="sub_gasto")
@@ -452,7 +466,7 @@ def formulario_de_registros(sheet):
         st.session_state.monto = 0.0
     monto = st.number_input("Ingrese el monto", step=0.01, format="%.2f", key="monto")
 
-    tipo_pago = st.selectbox("Selecciona el tipo de pago", ["Dólares", "Zelle", "BSF"], key="tipo_pago")
+    tipo_pago = st.selectbox("Selecciona el tipo de pago", ["Dólares","BSF"], key="tipo_pago")
     if tipo_pago == "BSF":
         tasa_cambio = st.number_input("Tasa de cambio", min_value=0.0, format="%.2f")
         if tasa_cambio == 0.0:
@@ -491,17 +505,17 @@ def formulario_de_registros(sheet):
 #-----------------------------------------------------------------------------------------------------
 # CREACION DEL REPORTE DE GASTOS POR CATEGORIAS
 def mostrar_resumen_ingresos(df, titulo):
-    if "SUB-CATEGORIA" in df.columns and "TIPO DE PAGO" in df.columns and "TASA DE CAMBIO" in df.columns and "MONTO" in df.columns:
+    if "SUBCATEGORIA" in df.columns and "TIPO DE PAGO" in df.columns and "TASA DE CAMBIO" in df.columns and "MONTO" in df.columns:
         st.subheader(titulo)
         
         # Resumen por subcategoría de ingreso
-        resumen_subcategorias = df.groupby(["SUB-CATEGORIA", "TIPO DE PAGO"])["MONTO"].sum().reset_index()
+        resumen_subcategorias = df.groupby(["SUBCATEGORIA", "TIPO DE PAGO"])["MONTO"].sum().reset_index()
         st.dataframe(resumen_subcategorias)
         
         # Sumar los montos por tipo de pago (Dólares, Zelle y BsF por separado)
         total_ingresos = df.groupby("TIPO DE PAGO")["MONTO"].sum().reset_index()
 
-#-------------------------------------------------------------------------
+
         # Filtrar solo ingresos en BsF
         df_bsf = df[df["TIPO DE PAGO"] == "BSF"].copy()
 
@@ -509,7 +523,7 @@ def mostrar_resumen_ingresos(df, titulo):
         df_bsf["MONTO EN USD"] = df_bsf["MONTO"] / df_bsf["TASA DE CAMBIO"]
 
         # Seleccionar solo las columnas necesarias
-        df_bsf_resumen = df_bsf[["SUB-CATEGORIA", "MONTO", "TASA DE CAMBIO", "MONTO EN USD"]]
+        df_bsf_resumen = df_bsf[["SUBCATEGORIA", "MONTO", "TASA DE CAMBIO", "MONTO EN USD"]]
 
         # Calcular el total de BsF convertidos a USD
         total_usd = df_bsf["MONTO EN USD"].sum()
@@ -537,9 +551,11 @@ def mostrar_resumen_ingresos(df, titulo):
 # SECCION DE REPORTES
 
 def reporte_ingresos_por_fecha():
+
     
     # df, _ = cargar_datos()  # Cargamos los datos desde Google Sheets
     df = st.session_state.df
+    
 
     if df.empty:
         st.warning("No hay datos disponibles para generar reportes.")
@@ -604,10 +620,11 @@ def reporte_ingresos_por_fecha():
 #-------------------------------------------------------------------------------------------------------
 # CREACION DEL REPORTE DE GASTOS POR CATEGORIAS
 def mostrar_resumen(df, titulo):
+     
             
-     if "SUB-CATEGORIA" in df.columns and "TIPO DE PAGO" in df.columns and "MONTO" in df.columns:
+     if "SUBCATEGORIA" in df.columns and "TIPO DE PAGO" in df.columns and "MONTO" in df.columns:
          st.subheader(titulo)
-         resumen = df.groupby(["SUB-CATEGORIA", "TIPO DE PAGO"]) ["MONTO"].sum().reset_index()
+         resumen = df.groupby(["SUBCATEGORIA", "TIPO DE PAGO"]) ["MONTO"].sum().reset_index()
          st.dataframe(resumen)
                 # 🔹 Sumar los montos por tipo de pago (Dólares, Zelle y BsF por separado)
          total_general = df.groupby("TIPO DE PAGO")["MONTO"].sum().reset_index()
@@ -625,8 +642,10 @@ def mostrar_resumen(df, titulo):
 
 #----------------------------------------------------------------------------------------------------
 def reporte_de_gastos_por_fecha():
-    #df, _ = cargar_datos()  # Cargamos los datos desde Google Sheets
+    
     df = st.session_state.df
+    # Obtener df_subs desde session_state
+    df_subs = st.session_state.df_subs
 
     if df.empty:
         st.warning("No hay datos disponibles para generar reportes.")
@@ -666,55 +685,126 @@ def reporte_de_gastos_por_fecha():
 
 
         # Filtrar gastos dentro del rango de fechas
-        df_filtrado = df_gastos[
+        df_gastos_filtrado = df_gastos[
             (df_gastos["FECHA"] >= fecha_inicio) & 
             (df_gastos["FECHA"] <= fecha_fin)
         ]
 
         # Si no hay datos filtrados, mostrar mensaje de advertencia
-        if df_filtrado.empty:
+        if df_gastos_filtrado.empty:
             st.warning("⚠️ No hay gastos registrados en el rango seleccionado.")
         else:
             st.success(f"📅 Mostrando datos desde {fecha_inicio} hasta {fecha_fin}")
 
 
             # Convertir las fechas a formato día/mes/año solo para mostrar
-            df_filtrado["FECHA"] = df_filtrado["FECHA"].dt.strftime("%d/%m/%Y")
+            df_gastos_filtrado["FECHA"] = df_gastos_filtrado["FECHA"].dt.strftime("%d/%m/%Y")
 
-            st.dataframe(df_filtrado)
+            st.dataframe(df_gastos_filtrado)
+#------------------------------------------------------------------------------------------------------------
+            
+           
+        # Limpiar columnas para unir correctamente
+        df_gastos_filtrado["SUBCATEGORIA"] = df_gastos_filtrado["SUBCATEGORIA"].str.strip().str.lower()
+        df_subs["SUBCATEGORIA"] = df_subs["SUBCATEGORIA"].str.strip().str.lower()
+           
+         # Unir con df_subs para obtener el tipo de gasto
+        df_gastos_filtrado = df_gastos_filtrado.merge(
+            df_subs[df_subs["CATEGORIA"] == "Gasto"][["SUBCATEGORIA", "TIPO DE GASTO"]],
+            on="SUBCATEGORIA",
+            how="left"
+        )
+   
+        # Separar fijos y variables
+        df_fijos = df_gastos_filtrado[df_gastos_filtrado["TIPO DE GASTO"] == "Gasto Fijo"]
+        df_variables = df_gastos_filtrado[df_gastos_filtrado["TIPO DE GASTO"] == "Gasto Variable"]
 
-            # Subcategorías para los tipos de gastos
-            subcategorias_fijas = ["Alquiler", "Nómina", "Servicios", "Gas", "Piscina", 
-                               "Contadora", "Mantenimiento"]
-            subcategorias_variables = ["Publicidad", "Comisiones", "Transporte", "Comida","SEMAT","IVA","ISLR","IVSS","FAO","Pensiones","Patente","Otros"]
+               
 
-                    # Reporte de Gasto Fijo (basado en subcategorías)
-            df_fijo = df_filtrado[df_filtrado["SUB-CATEGORIA"].isin(subcategorias_fijas)]
-            if not df_fijo.empty:
-                mostrar_resumen(df_fijo, "Gastos Fijos")
+        # Subtotales por tipo de pago
+        subtotal_fijos_pago = df_fijos.groupby("TIPO DE PAGO")["MONTO"].sum().reset_index()
+        subtotal_variables_pago = df_variables.groupby("TIPO DE PAGO")["MONTO"].sum().reset_index()
+
+
+        # Gastos fijos
+        total_fijos_bsf = df_fijos[df_fijos["TIPO DE PAGO"] == "BSF"]["MONTO"].sum()
+        total_fijos_usd = df_fijos[df_fijos["TIPO DE PAGO"] != "BSF"]["MONTO"].sum()
+
+        # Gastos variables
+        total_variables_bsf = df_variables[df_variables["TIPO DE PAGO"] == "BSF"]["MONTO"].sum()
+        total_variables_usd = df_variables[df_variables["TIPO DE PAGO"] != "BSF"]["MONTO"].sum()
+
+
+        # Totales
         
-                    # Reporte de Gasto Variable (basado en subcategorías)
-            df_variable = df_filtrado[df_filtrado["SUB-CATEGORIA"].isin(subcategorias_variables)]
-            if not df_variable.empty:
-                mostrar_resumen(df_variable, "Gastos Variables")
+        total_general_usd = total_fijos_usd+total_variables_usd
+        total_general_bsf = total_fijos_bsf+total_variables_bsf
 
 
-            # Crear una tabla resumen totalizando ambos (Gastos Fijos + Variables)
-            total_fijos = df_fijo.groupby("TIPO DE PAGO")["MONTO"].sum().reset_index()
-            total_variables = df_variable.groupby("TIPO DE PAGO")["MONTO"].sum().reset_index()
+        # cuadros resumenes
 
-            # Unir ambos dataframes para mostrar el resumen
-            resumen_total = pd.merge(total_fijos, total_variables, on="TIPO DE PAGO", how="outer", suffixes=('_fijos', '_variables'))
+        st.subheader("💰 Subtotales de Gastos Fijos por Tipo de moneda")
+        st.dataframe(subtotal_fijos_pago.style.format({"MONTO": "{:,.2f}"}))
+        st.markdown(f"**Total Gastos Fijos en US$:  {total_fijos_usd:,.2f}**")
+        st.markdown(f"**Total Gastos Fijos en BSF: {total_fijos_bsf:,.2f}**")
 
-            # Rellenar NaN con 0 para evitar errores al mostrar
-            resumen_total = resumen_total.fillna(0)
+        st.markdown("---")
 
-            # Sumar los totales por tipo de pago
-            resumen_total["Total"] = resumen_total["MONTO_fijos"] + resumen_total["MONTO_variables"]
+        st.subheader("💸 Subtotales de Gastos Variables por Tipo de moneda")
+        st.dataframe(subtotal_variables_pago.style.format({"MONTO": "{:,.2f}"}))
+        st.markdown(f"**Total Gastos Variables en US$: {total_variables_usd:,.2f}**")
+        st.markdown(f"**Total Gastos Variables en BSF: {total_variables_bsf:,.2f}**")
 
-            # Mostrar la tabla resumen
-            st.subheader("🔹 Resumen Total de Gastos por Tipo de Pago")
-            st.dataframe(resumen_total)
+        st.subheader("💸 Total de gastos por tipo de moneda")
+        
+        st.markdown(f"**Total Gastos en US$:  {total_general_usd:,.2f}**")
+        st.markdown(f"**Total Gastos en BSF:  {total_general_bsf:,.2f}**")
+
+        st.markdown("---")
+
+        st.subheader("👤 Detalle para SAHA-Gastos Fijos")
+
+        # Filtrar solo SAHA
+        fijos_saha = df_fijos[df_fijos["RESPONSABLE"] == "SAHA"]
+        detalle_fijos = fijos_saha.groupby("TIPO DE PAGO")["MONTO"].sum().reset_index()
+
+        for tipo_pago in detalle_fijos["TIPO DE PAGO"].unique():
+            st.markdown(f"**Tipo de Pago: {tipo_pago}**")
+            monto = detalle_fijos[detalle_fijos["TIPO DE PAGO"] == tipo_pago]["MONTO"].values[0]
+            df_temp = fijos_saha[fijos_saha["TIPO DE PAGO"] == tipo_pago].groupby("RESPONSABLE")["MONTO"].sum().reset_index()
+            st.dataframe(df_temp.style.format({"MONTO": "{:,.2f}"}), use_container_width=True)
+            st.markdown(f"**Total Gastos Fijos de SAHA con {tipo_pago}: {monto:,.2f}**")
+
+        st.markdown("---")
+        st.subheader("👤 Detalle para SAHA - Gastos Variables")
+
+        # Filtrar solo SAHA
+        variables_saha = df_variables[df_variables["RESPONSABLE"] == "SAHA"]
+        detalle_variables = variables_saha.groupby("TIPO DE PAGO")["MONTO"].sum().reset_index()
+
+        for tipo_pago in detalle_variables["TIPO DE PAGO"].unique():
+            st.markdown(f"**Tipo de Pago: {tipo_pago}**")
+            monto = detalle_variables[detalle_variables["TIPO DE PAGO"] == tipo_pago]["MONTO"].values[0]
+            df_temp = variables_saha[variables_saha["TIPO DE PAGO"] == tipo_pago].groupby("RESPONSABLE")["MONTO"].sum().reset_index()
+            st.dataframe(df_temp.style.format({"MONTO": "{:,.2f}"}), use_container_width=True)
+            st.markdown(f"**Total Gastos Variables de SAHA con {tipo_pago}: {monto:,.2f}**")
+
+        st.subheader("📊 Totales Generales de SAHA por Tipo de Gasto y Tipo de Pago")
+
+        # Totales por tipo de gasto y tipo de pago
+        total_saha_fijos = fijos_saha.groupby("TIPO DE PAGO")["MONTO"].sum().reset_index()
+        total_saha_fijos["TIPO DE GASTO"] = "Gasto Fijo"
+
+        total_saha_variables = variables_saha.groupby("TIPO DE PAGO")["MONTO"].sum().reset_index()
+        total_saha_variables["TIPO DE GASTO"] = "Gasto Variable"
+
+        # Combinar ambos
+        total_saha_completo = pd.concat([total_saha_fijos, total_saha_variables])
+        total_saha_completo = total_saha_completo[["TIPO DE GASTO", "TIPO DE PAGO", "MONTO"]]
+        total_saha_completo = total_saha_completo.sort_values(by=["TIPO DE GASTO", "TIPO DE PAGO"])
+
+        st.dataframe(total_saha_completo.style.format({"MONTO": "{:,.2f}"}), use_container_width=True)
+
 
 
     else:
@@ -849,7 +939,7 @@ def formulario_edicion(registro, worksheet, df,sheet):
     
     # Tipo de pago
     tipo_pago = st.selectbox("Selecciona el tipo de pago", ["Dólares", "Zelle", "BSF"], 
-                             index=["Dólares", "Zelle", "BSF"].index(registro["TIPO DE PAGO"]), 
+                             index=["Dólares","BSF"].index(registro["TIPO DE PAGO"]), 
                              key="tipo_pago")
 
     
