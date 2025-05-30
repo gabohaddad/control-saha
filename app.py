@@ -73,6 +73,7 @@ def cargar_datos_auxiliares(sheet):
 def autenticacion_google_sheets():
     # Detectar entorno: si existe la variable de entorno STREAMLIT_SERVER_SOFTWARE, asumimos cloud
     is_streamlit_cloud = "STREAMLIT_SERVER_SOFTWARE" in os.environ
+    st.write("¿Está en Streamlit Cloud?", is_streamlit_cloud)  # TEMPORAL
     
     if is_streamlit_cloud:
         # En Streamlit Cloud cargamos las credenciales desde secrets
