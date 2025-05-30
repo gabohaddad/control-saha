@@ -69,35 +69,12 @@ def cargar_datos_auxiliares(sheet):
         st.session_state.cuentas = cargar_cuentas(sheet)
 #----------------------------------------------------------------------------------------------
 # Obtener la ruta del archivo JSON desde la variable de entorno .env
-
 def autenticacion_google_sheets():
-    # Detectar entorno: si existe la variable de entorno STREAMLIT_SERVER_SOFTWARE, asumimos cloud
-    is_streamlit_cloud = "STREAMLIT_SERVER_SOFTWARE" in os.environ
-    st.write("¿Está en Streamlit Cloud?", is_streamlit_cloud)  # TEMPORAL
+    st.subheader("🔍 Variables de entorno detectadas:")
     
-    if is_streamlit_cloud:
-        # En Streamlit Cloud cargamos las credenciales desde secrets
-        # secrets["GOOGLE_SERVICE_ACCOUNT"] debe tener todo el JSON como dict
-        service_account_info = st.secrets["GOOGLE_SERVICE_ACCOUNT"]
-        credentials = Credentials.from_service_account_info(
-            service_account_info,
-            scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        )
-        print("Autenticado en Streamlit Cloud")
-    else:
-        # Localmente cargamos dotenv y la ruta al archivo JSON
-        load_dotenv()
-        ruta_credenciales = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-        if ruta_credenciales is None or ruta_credenciales.strip() == "":
-            raise ValueError("No se encontró la ruta a las credenciales en la variable de entorno.")
-        credentials = Credentials.from_service_account_file(
-            ruta_credenciales,
-            scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        )
-        print("Autenticado localmente con archivo JSON")
-    
-    cliente = gspread.authorize(credentials)
-    return cliente
+    for key, value in os.environ.items():
+        st.write(f"{key}: {value}")
+
 #-----------------------------------------------------------------------------------------
 # --- Función para cargar los datos de Google Sheets en un dataframe---
  
