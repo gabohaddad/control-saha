@@ -6,7 +6,6 @@ from datetime import datetime, date
 import time  # Importar el módulo time
 import numpy as np
 import unicodedata # para estandarizar formato de titulo de columnas
-import toml
 
 
 #from google_sheets import obtener_registros
