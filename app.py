@@ -68,46 +68,52 @@ def cargar_datos_auxiliares(sheet):
     if "cuentas" not in st.session_state:
         st.session_state.cuentas = cargar_cuentas(sheet)
 #----------------------------------------------------------------------------------------------
+import os
 import json
 import gspread
-import os
 from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
 import streamlit as st
 
 def autenticacion_google_sheets():
-    st.write("Variables de entorno actuales:")
+    #st.write("🔄 Cargando datos desde Google Sheets...")
+    #st.write("📦 Variables de entorno actuales:")
     st.json(dict(os.environ))
 
-    try:
-        # 🌐 Streamlit Cloud
-        cred_json = st.secrets["GOOGLE_SERVICE_ACCOUNT"]
-        info = json.loads(cred_json)
-        st.write("🟢 Detectado entorno Streamlit Cloud.")
-        credentials = Credentials.from_service_account_info(
-            info,
-            scopes=[
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive"
-            ]
-        )
-    except Exception as e:
-        # 💻 Entorno local
-        st.write("🔵 Entorno local detectado.")
-        load_dotenv()
-        ruta_credenciales = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-        if not ruta_credenciales or not os.path.exists(ruta_credenciales):
-            raise ValueError("No se encontró la ruta a las credenciales en la variable de entorno.")
-        credentials = Credentials.from_service_account_file(
-            ruta_credenciales,
-            scopes=[
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive"
-            ]
-        )
+    # Intenta autenticarse usando st.secrets (Streamlit Cloud)
+    if "GOOGLE_SERVICE_ACCOUNT" in st.secrets:
+        try:
+            st.write("🟢 Entorno Streamlit Cloud detectado.")
+            service_account_info = json.loads(st.secrets["GOOGLE_SERVICE_ACCOUNT"])
+            credentials = Credentials.from_service_account_info(
+                service_account_info,
+                scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+            )
+            cliente = gspread.authorize(credentials)
+            return cliente
+        except Exception as e:
+            st.error("❌ Error al autenticar con st.secrets en Streamlit Cloud.")
+            st.exception(e)
+            raise e
 
-    cliente = gspread.authorize(credentials)
-    return cliente
+    # Si no está en st.secrets, intenta entorno local
+    else:
+        try:
+            st.write("🔵 Entorno local detectado.")
+            load_dotenv()
+            ruta_credenciales = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+            if not ruta_credenciales or not os.path.exists(ruta_credenciales):
+                raise ValueError("No se encontró la ruta a las credenciales en la variable de entorno.")
+            credentials = Credentials.from_service_account_file(
+                ruta_credenciales,
+                scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+            )
+            cliente = gspread.authorize(credentials)
+            return cliente
+        except Exception as e:
+            st.error("❌ Error al autenticar en entorno local.")
+            st.exception(e)
+            raise e
 
 
 #-----------------------------------------------------------------------------------------
