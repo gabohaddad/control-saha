@@ -78,7 +78,7 @@ import streamlit as st
 def autenticacion_google_sheets():
     #st.write("🔄 Cargando datos desde Google Sheets...")
     #st.write("📦 Variables de entorno actuales:")
-    st.json(dict(os.environ))
+    #st.json(dict(os.environ))
 
     # Intenta autenticarse usando st.secrets (Streamlit Cloud)
     if "GOOGLE_SERVICE_ACCOUNT" in st.secrets:
