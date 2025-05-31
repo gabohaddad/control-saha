@@ -95,66 +95,49 @@ def autenticacion_google_sheets():
 
 #-----------------------------------------------------------------------------------------
 # --- Función para cargar los datos de Google Sheets en un dataframe---
- 
 def cargar_datos_principales():
-    
- 
- # 🔗 Llamar la función para autenticar y obtener el cliente
+    st.subheader("🔄 Cargando datos desde Google Sheets...")
+
+    # Autenticación con Google Sheets
     cliente = autenticacion_google_sheets()
-    # creamos el archivo .env para guardar las claves sensibles que guardan data como google sheet
-    # de esta manera si lo subimos Git Hub nadie puede ver la data
 
-    SHEET_ID = st.secrets.get("SHEET_ID")
-    if SHEET_ID is None:
-        st.error("❌ No se encontró la variable SHEET_ID en secrets.toml.")
-    else:
-        st.success(f"✅ SHEET_ID cargado correctamente: {SHEET_ID}")
-
-
-
-    # 🌐 Detectar si estamos en Streamlit Cloud
-    #is_streamlit_cloud = "STREAMLIT_SERVER_SOFTWARE" in os.environ
- # 📄 Reemplaza con tu Sheet ID obtenido de la URL de Google Sheets
-    # Cargar las variables de entorno desde el archivo .env
-
-    
+    # Obtener SHEET_ID desde secrets o .env
     try:
         SHEET_ID = st.secrets["SHEET_ID"]
-    except:
+        st.write("🟢 SHEET_ID obtenido desde secrets.toml")
+    except KeyError:
         SHEET_ID = os.getenv("SHEET_ID")
+        st.write("🔵 SHEET_ID obtenido desde .env")
 
+    if not SHEET_ID:
+        st.error("❌ No se encontró SHEET_ID en secrets.toml ni en .env")
+        return None, None
 
-    
- # 🔍 Acceder a la primera hoja del archivo
-    # esta parte es para cargar los datos al programa para trabajar con ellos en las diferentes
-    # secciones
-    
-    #archivo = cliente.open_by_key(SHEET_ID)
+    # Acceder a la hoja
     try:
         archivo = cliente.open_by_key(SHEET_ID)
+        worksheet = archivo.sheet1
     except Exception as e:
-        st.error(f"No se pudo abrir la hoja con ese ID: {SHEET_ID}")
+        st.error(f"❌ No se pudo abrir el archivo con ID: {SHEET_ID}")
         st.exception(e)
         return None, None
 
-    
-    # Leer los datos de Google Sheets
-    worksheet = archivo.sheet1 # ✅ obtener la primera hoja correctamente
+    # Leer y cargar los datos
     data = worksheet.get_all_records()
     df = pd.DataFrame(data)
 
-    # con esto vamos a guardar la hoja worksheet en session st para usarla en las 
-    # otros modulos 
+    # Guardar en session_state
     st.session_state.worksheet = worksheet
     st.session_state.df = df
 
-
-    # Verificar si existe la columna "ID"
+    # Validar columna ID
     if "ID" not in df.columns:
-        st.error("No se encontró la columna 'ID' en los datos.")
-    
+        st.warning("⚠️ La columna 'ID' no está presente en los datos.")
+
+    st.success("✅ Datos cargados correctamente.")
     return df, archivo
-#-------------------------------------------------------------------------------------
+
+#--------------------------------------------------------------------------------------
  # BLOQUE PRINCIPAL DE CARGA
 
 # Verificar si los datos principales ya están en session_state
