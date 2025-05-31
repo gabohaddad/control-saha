@@ -68,18 +68,31 @@ def cargar_datos_auxiliares(sheet):
     if "cuentas" not in st.session_state:
         st.session_state.cuentas = cargar_cuentas(sheet)
 #----------------------------------------------------------------------------------------------
+import json
+import gspread
+import os
+from google.oauth2.service_account import Credentials
+from dotenv import load_dotenv
+import streamlit as st
+
 def autenticacion_google_sheets():
     st.write("Variables de entorno actuales:")
     st.json(dict(os.environ))
 
     try:
-        service_account_info = st.secrets["GOOGLE_SERVICE_ACCOUNT"]
+        # 🌐 Streamlit Cloud
+        cred_json = st.secrets["GOOGLE_SERVICE_ACCOUNT"]
+        info = json.loads(cred_json)
         st.write("🟢 Detectado entorno Streamlit Cloud.")
         credentials = Credentials.from_service_account_info(
-            service_account_info,
-            scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+            info,
+            scopes=[
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
         )
     except Exception as e:
+        # 💻 Entorno local
         st.write("🔵 Entorno local detectado.")
         load_dotenv()
         ruta_credenciales = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
@@ -87,11 +100,15 @@ def autenticacion_google_sheets():
             raise ValueError("No se encontró la ruta a las credenciales en la variable de entorno.")
         credentials = Credentials.from_service_account_file(
             ruta_credenciales,
-            scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+            scopes=[
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
         )
-    
+
     cliente = gspread.authorize(credentials)
     return cliente
+
 
 #-----------------------------------------------------------------------------------------
 # --- Función para cargar los datos de Google Sheets en un dataframe---
