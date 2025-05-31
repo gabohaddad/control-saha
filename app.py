@@ -120,7 +120,14 @@ def cargar_datos_principales():
     # esta parte es para cargar los datos al programa para trabajar con ellos en las diferentes
     # secciones
     
-    archivo = cliente.open_by_key(SHEET_ID)
+    #archivo = cliente.open_by_key(SHEET_ID)
+    try:
+        archivo = cliente.open_by_key(SHEET_ID)
+    except Exception as e:
+        st.error(f"No se pudo abrir la hoja con ese ID: {SHEET_ID}")
+        st.exception(e)
+        return None, None
+
     
     # Leer los datos de Google Sheets
     worksheet = archivo.sheet1 # ✅ obtener la primera hoja correctamente
