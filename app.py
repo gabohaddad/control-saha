@@ -69,36 +69,26 @@ def cargar_datos_auxiliares(sheet):
         st.session_state.cuentas = cargar_cuentas(sheet)
 #----------------------------------------------------------------------------------------------
 def autenticacion_google_sheets():
-
-    # TEMPORAL: Ver todas las variables de entorno para debug
     st.write("Variables de entorno actuales:")
-    st.json(dict(os.environ))  # 👈 Esto te dará visibilidad
+    st.json(dict(os.environ))
 
-    is_streamlit_cloud = "STREAMLIT_SERVER_SOFTWARE" in os.environ
-    st.write("¿Está en Streamlit Cloud?", is_streamlit_cloud)
-    ...
-    
-    
-    if is_streamlit_cloud:
-        # En Streamlit Cloud cargamos las credenciales desde secrets
-        # secrets["GOOGLE_SERVICE_ACCOUNT"] debe tener todo el JSON como dict
+    try:
         service_account_info = st.secrets["GOOGLE_SERVICE_ACCOUNT"]
+        st.write("🟢 Detectado entorno Streamlit Cloud.")
         credentials = Credentials.from_service_account_info(
             service_account_info,
             scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         )
-        print("Autenticado en Streamlit Cloud")
-    else:
-        # Localmente cargamos dotenv y la ruta al archivo JSON
+    except Exception as e:
+        st.write("🔵 Entorno local detectado.")
         load_dotenv()
         ruta_credenciales = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-        if ruta_credenciales is None or ruta_credenciales.strip() == "":
+        if not ruta_credenciales or not os.path.exists(ruta_credenciales):
             raise ValueError("No se encontró la ruta a las credenciales en la variable de entorno.")
         credentials = Credentials.from_service_account_file(
             ruta_credenciales,
             scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         )
-        print("Autenticado localmente con archivo JSON")
     
     cliente = gspread.authorize(credentials)
     return cliente
@@ -115,14 +105,15 @@ def cargar_datos_principales():
     # de esta manera si lo subimos Git Hub nadie puede ver la data
 
     # 🌐 Detectar si estamos en Streamlit Cloud
-    is_streamlit_cloud = "STREAMLIT_SERVER_SOFTWARE" in os.environ
+    #is_streamlit_cloud = "STREAMLIT_SERVER_SOFTWARE" in os.environ
  # 📄 Reemplaza con tu Sheet ID obtenido de la URL de Google Sheets
     # Cargar las variables de entorno desde el archivo .env
     
-    if is_streamlit_cloud:
+    try:
         SHEET_ID = st.secrets["SHEET_ID"]
-    else:
-        SHEET_ID = os.getenv('SHEET_ID')
+    except:
+        SHEET_ID = os.getenv("SHEET_ID")
+
 
     
  # 🔍 Acceder a la primera hoja del archivo
