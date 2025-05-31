@@ -71,7 +71,7 @@ def cargar_datos_auxiliares(sheet):
 # Obtener la ruta del archivo JSON desde la variable de entorno .env
 def autenticacion_google_sheets():
     st.subheader("🔍 Variables de entorno detectadas:")
-    
+   
     for key, value in os.environ.items():
         st.write(f"{key}: {value}")
 
@@ -91,7 +91,7 @@ def cargar_datos_principales():
     
 
     # Obtener el SHEET_ID desde la variable de entorno
-    SHEET_ID = os.getenv('SHEET_ID')
+    SHEET_ID = st.secrets["SHEET_ID"]
 
  # 🔍 Acceder a la primera hoja del archivo
     # esta parte es para cargar los datos al programa para trabajar con ellos en las diferentes
