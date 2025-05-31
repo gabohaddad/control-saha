@@ -104,10 +104,19 @@ def cargar_datos_principales():
     # creamos el archivo .env para guardar las claves sensibles que guardan data como google sheet
     # de esta manera si lo subimos Git Hub nadie puede ver la data
 
+    SHEET_ID = st.secrets.get("SHEET_ID")
+    if SHEET_ID is None:
+        st.error("❌ No se encontró la variable SHEET_ID en secrets.toml.")
+    else:
+        st.success(f"✅ SHEET_ID cargado correctamente: {SHEET_ID}")
+
+
+
     # 🌐 Detectar si estamos en Streamlit Cloud
     #is_streamlit_cloud = "STREAMLIT_SERVER_SOFTWARE" in os.environ
  # 📄 Reemplaza con tu Sheet ID obtenido de la URL de Google Sheets
     # Cargar las variables de entorno desde el archivo .env
+
     
     try:
         SHEET_ID = st.secrets["SHEET_ID"]
