@@ -15,7 +15,7 @@ from gspread_pandas import Spread
 
 from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
-
+import json
 import os
 #______________________________________________________________________________
 
@@ -71,12 +71,12 @@ def cargar_datos_auxiliares(sheet):
     if "cuentas" not in st.session_state:
         st.session_state.cuentas = cargar_cuentas(sheet)
 #----------------------------------------------------------------------------------------------
-import os
-import json
-import gspread
-from google.oauth2.service_account import Credentials
-from dotenv import load_dotenv
-import streamlit as st
+#import os
+
+#import gspread
+#from google.oauth2.service_account import Credentials
+#from dotenv import load_dotenv
+#import streamlit as st
 
 def autenticacion_google_sheets():
     #st.write("🔄 Cargando datos desde Google Sheets...")
@@ -121,9 +121,25 @@ def autenticacion_google_sheets():
 from gspread_pandas import Spread
 # el dicccionario gspread-pandas me ayuda para gestionar mejor las cuentas en google sheets
 def obtener_spread():
-    cliente = autenticacion_google_sheets()
-    spread = Spread("BD DE REGISTROS FINANCIEROS", client=cliente)
+    # Duplicamos la lógica pero devolvemos cliente y creds
+    if "GOOGLE_SERVICE_ACCOUNT" in st.secrets:
+        service_account_info = json.loads(st.secrets["GOOGLE_SERVICE_ACCOUNT"])
+        credentials = Credentials.from_service_account_info(
+            service_account_info,
+            scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        )
+    else:
+        load_dotenv()
+        ruta_credenciales = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+        credentials = Credentials.from_service_account_file(
+            ruta_credenciales,
+            scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        )
+
+    cliente = gspread.authorize(credentials)
+    spread = Spread("BD DE REGISTROS FINANCIEROS", client=cliente, creds=credentials)
     return spread
+
 
 #-----------------------------------------------------------------------------------------
 # --- Función para cargar los datos de Google Sheets en un dataframe---
@@ -456,9 +472,8 @@ def formulario_de_registros(sheet):
         limpiar_campos()
         return
      
-    fecha = st.date_input("Fecha de la transacción", value=datetime.today().date(), key="fecha")
-    #fecha_formateada = fecha.strftime("%d/%m/%Y")
-
+    fecha = st.date_input("Fecha de la transaccion", value=date.today(), format="DD/MM/YYYY",key="fecha") 
+    
     categoria = st.selectbox("Selecciona la categoría", ["", "Ingreso", "Gasto"], key="categoria")
     subcategoria = None
     tipo_gasto = None
@@ -532,7 +547,7 @@ def formulario_de_registros(sheet):
             st.warning("Por favor, completa todos los campos antes de agregar el registro.")  
 
 #-----------------------------------------------------------------------------------------------------
-# CREACION DEL REPORTE DE GASTOS POR CATEGORIAS
+# CREACION DEL REPORTE DE INGRESOS POR CATEGORIAS
 def mostrar_resumen_ingresos(df, titulo):
     if "SUBCATEGORIA" in df.columns and "TIPO DE PAGO" in df.columns and "TASA DE CAMBIO" in df.columns and "MONTO" in df.columns:
         st.subheader(titulo)
@@ -988,19 +1003,15 @@ def formulario_edicion(registro, worksheet, df,sheet):
     cuenta_bancaria = st.session_state.cuentas 
 
     
-    fecha_raw = registro["FECHA"]
+    # Convertir directamente el string en formato dd/mm/yyyy a date
+    fecha_str = registro["FECHA"]
 
     try:
-        # Intenta con formato dia/mes/año
-        fecha_obj = datetime.strptime(fecha_raw, "%d/%m/%Y").date()
+        fecha_obj = datetime.strptime(fecha_str, "%d/%m/%Y").date()
     except:
-        try:
-            # Intenta con formato año-mes-día si falla el anterior
-            fecha_obj = datetime.strptime(fecha_raw, "%Y-%m-%d").date()
-        except:
-            # Si todo falla, usa la fecha de hoy
-            fecha_obj = date.today()
-        
+        fecha_obj = date.today()
+
+    # Mostrar en el formulario
     fecha = st.date_input("Fecha de la transacción", value=fecha_obj, key="fecha")
     
 
@@ -1218,43 +1229,40 @@ def formulario_edicion(registro, worksheet, df,sheet):
 #---------------------------------------------------------------------------------------------------
 # MODULO DE GESTION DE CUENTAS BANCARIAS 
 def gestionar_cuentas():
-    st.title("Gestión de Cuentas Bancarias")
+
+    st.subheader("Agregar o Modificar Saldo Inicial")
 
     spread = obtener_spread()
-    
-    # Cargar datos actuales de cuentas
-    df_cuentas = spread.sheet_to_df(sheet="Cuentas", index=None)
-    
-    if df_cuentas.empty:
-        df_cuentas = pd.DataFrame(columns=["CUENTA", "FECHA SALDO INICIAL", "SALDO INICIAL"])
-    
-    st.subheader("Cuentas actuales")
-    df_edit = st.experimental_data_editor(df_cuentas, num_rows="dynamic")
-    
-    if st.button("Guardar cambios en cuentas"):
-        df_edit["FECHA SALDO INICIAL"] = pd.to_datetime(df_edit["FECHA SALDO INICIAL"], errors="coerce").dt.strftime("%Y-%m-%d")
-        df_edit["SALDO INICIAL"] = pd.to_numeric(df_edit["SALDO INICIAL"], errors="coerce").fillna(0)
-        df_edit["CUENTA"] = df_edit["CUENTA"].astype(str)
-        spread.df_to_sheet(df_edit, sheet="Cuentas", index=False, replace=True)
-        st.success("Datos guardados correctamente.")
-    
-    st.subheader("Agregar nueva cuenta")
-    nueva_cuenta = st.text_input("Nombre de la cuenta")
-    nueva_fecha = st.date_input("Fecha saldo inicial", pd.to_datetime("today"))
-    nuevo_saldo = st.number_input("Saldo inicial", min_value=0.0, format="%.2f")
-    
-    if st.button("Agregar cuenta"):
-        if nueva_cuenta.strip() == "":
-            st.error("El nombre de la cuenta no puede estar vacío.")
-        else:
-            nueva_fila = pd.DataFrame({
-                "CUENTA": [nueva_cuenta.strip()],
-                "FECHA SALDO INICIAL": [nueva_fecha.strftime("%Y-%m-%d")],
-                "SALDO INICIAL": [nuevo_saldo]
-            })
-            df_actualizado = pd.concat([df_cuentas, nueva_fila], ignore_index=True)
-            spread.df_to_sheet(df_actualizado, sheet="Cuentas", index=False, replace=True)
-            st.success(f"Cuenta '{nueva_cuenta}' agregada correctamente.")
+
+    # Leer hoja "cuentas" como DataFrame
+    df_cuentas = spread.sheet_to_df(sheet='Cuentas', index=None)
+
+    # Asegurar que las columnas existen
+    columnas_esperadas = ['CUENTA', 'FECHA SALDO INICIAL', 'SALDO INICIAL','MONEDA']
+    for col in columnas_esperadas:
+        if col not in df_cuentas.columns:
+            st.error(f"La columna '{col}' no está presente en la hoja 'Cuentas'. Verifica la estructura.")
+            return
+
+    cuentas = df_cuentas['CUENTA'].dropna().unique().tolist()
+
+    cuenta_seleccionada = st.selectbox("Selecciona la cuenta", cuentas)
+    fecha_saldo = st.date_input("Fecha del Saldo Inicial", value=date.today(), format="DD/MM/YYYY")
+    saldo_inicial = st.number_input("Saldo Inicial", step=0.01, format="%.2f")
+    moneda = st.selectbox("Moneda del saldo inicial", ["BSF", "Dólares", "Euros"])
+
+    if st.button("Guardar Saldo Inicial"):
+        try:
+            idx = df_cuentas[df_cuentas['CUENTA'] == cuenta_seleccionada].index[0]
+            df_cuentas.at[idx, 'FECHA SALDO INICIAL'] = fecha_saldo.strftime("%d/%m/%Y")
+            df_cuentas.at[idx, 'SALDO INICIAL'] = saldo_inicial
+            df_cuentas.at[idx, 'MONEDA'] = moneda
+
+            spread.df_to_sheet(df_cuentas, sheet='Cuentas', index=False)
+            st.success(f"Saldo inicial actualizado para '{cuenta_seleccionada}'")
+        except Exception as e:
+            st.error("Error al actualizar el saldo inicial.")
+            st.exception(e)  
 
 #---------------------------------------------------------------------------------------------------
 
@@ -1300,6 +1308,13 @@ elif pagina == "Ver Registros":
         worksheet = sheet.sheet1  # o la hoja correspondiente
         datos = worksheet.get_all_records()
         st.session_state.df = pd.DataFrame(datos)
+
+        # Convertir y formatear la columna 'Fecha' primero se convierte a date-time y luego date 
+        df["Fecha"] = pd.to_datetime(df["Fecha"], errors='coerce')
+        df["Fecha"] = df["Fecha"].dt.strftime('%d/%m/%Y')
+
+
+        st.session_state.df = df
         st.session_state.worksheet = worksheet  # Guardar la referencia de la hoja en session_state
     else:
         sheet = None  # Ya está cargado en session_state.df
@@ -1371,7 +1386,7 @@ elif pagina == "Reporte de Gastos":
     st.title("Reporte de Gastos por Tipo de Pago")
     reporte_de_gastos_por_fecha()
 
-elif pagina == "Cuentas Bancarias":
+elif pagina == "Bancos":
     st.title("Gestion de Cuentas")
     gestionar_cuentas()
 
