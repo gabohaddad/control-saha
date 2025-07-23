@@ -138,8 +138,10 @@ def obtener_spread():
                 scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
             )
 
-        cliente = gspread.authorize(credentials)
-        spread = Spread("BD DE REGISTROS FINANCIEROS", client=cliente, creds=credentials)
+        #cliente = gspread.authorize(credentials)
+        #spread = Spread("BD DE REGISTROS FINANCIEROS", client=cliente, creds=credentials)
+        spread = Spread("BD DE REGISTROS FINANCIEROS", creds=credentials)
+
         return spread
 
     except Exception as e:
