@@ -1320,9 +1320,20 @@ elif pagina == "Ver Registros":
         datos = worksheet.get_all_records()
         st.session_state.df = pd.DataFrame(datos)
 
+
+        st.write("Tipo de datos en Fecha:", type(df['Fecha'].iloc[0]))
+
         # Convertir y formatear la columna 'Fecha' primero se convierte a date-time y luego date 
         df["Fecha"] = pd.to_datetime(df["Fecha"], errors='coerce')
-        df["Fecha"] = df["Fecha"].dt.strftime('%d/%m/%Y')
+        # Verifica si existen fechas no convertidas (NaT)
+        if df['Fecha'].isnull().any():
+            st.warning("Hay fechas inválidas en el DataFrame.")
+
+    # Solo aplica strftime si hay valores no nulos
+        df['Fecha'] = df['Fecha'].apply(lambda x: x.strftime('%d/%m/%Y') if pd.notnull(x) else '')
+
+
+        #df["Fecha"] = df["Fecha"].dt.strftime('%d/%m/%Y')
 
 
         st.session_state.df = df
