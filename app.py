@@ -121,26 +121,29 @@ def autenticacion_google_sheets():
 from gspread_pandas import Spread
 # el dicccionario gspread-pandas me ayuda para gestionar mejor las cuentas en google sheets
 def obtener_spread():
-    # Duplicamos la lógica pero devolvemos cliente y creds
-    if "GOOGLE_SERVICE_ACCOUNT" in st.secrets:
-        service_account_info = json.loads(st.secrets["GOOGLE_SERVICE_ACCOUNT"])
-        credentials = Credentials.from_service_account_info(
-            service_account_info,
-            scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        )
-    else:
-        load_dotenv()
-        ruta_credenciales = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-        credentials = Credentials.from_service_account_file(
-            ruta_credenciales,
-            scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        )
+    try:
+    
+        # Duplicamos la lógica pero devolvemos cliente y creds
+        if "GOOGLE_SERVICE_ACCOUNT" in st.secrets:
+            service_account_info = json.loads(st.secrets["GOOGLE_SERVICE_ACCOUNT"])
+            credentials = Credentials.from_service_account_info(
+                service_account_info,
+                scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+            )
+        else:
+            load_dotenv()
+            ruta_credenciales = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+            credentials = Credentials.from_service_account_file(
+                ruta_credenciales,
+                scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+            )
 
-    cliente = gspread.authorize(credentials)
-    spread = Spread("BD DE REGISTROS FINANCIEROS", client=cliente, creds=credentials)
-    return spread
+        cliente = gspread.authorize(credentials)
+        spread = Spread("BD DE REGISTROS FINANCIEROS", client=cliente, creds=credentials)
+        return spread
 
-
+    except Exception as e:
+        raise RuntimeError(f"No se pudo autenticar con Google Sheets: {e}")
 #-----------------------------------------------------------------------------------------
 # --- Función para cargar los datos de Google Sheets en un dataframe---
 def cargar_datos_principales():
@@ -1232,7 +1235,13 @@ def gestionar_cuentas():
 
     st.subheader("Agregar o Modificar Saldo Inicial")
 
-    spread = obtener_spread()
+    try:
+        spread = obtener_spread()
+    except Exception as e:
+        st.error("Error al autenticar con Google Sheets.")
+        st.exception(e)
+        return
+
 
     # Leer hoja "cuentas" como DataFrame
     df_cuentas = spread.sheet_to_df(sheet='Cuentas', index=None)
