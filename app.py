@@ -55,7 +55,7 @@ def cargar_responsables(sheet):
 
 # Función para cargar las cuentas bancarias
 def cargar_cuentas(sheet):
-    cuentas_data = sheet.worksheet("Cuentas").col_values(1)[1:]  # Omite la primera fila (encabezado)
+    cuentas_data = sheet.worksheet("Saldos").col_values(1)[1:]  # Omite la primera fila (encabezado)
     cuentas = [cuenta for cuenta in cuentas_data if cuenta]  # Filtra las cuentas no vacías
     return cuentas
 #--------------------------------------------------------------------------------------------------
@@ -71,18 +71,9 @@ def cargar_datos_auxiliares(sheet):
     if "cuentas" not in st.session_state:
         st.session_state.cuentas = cargar_cuentas(sheet)
 #----------------------------------------------------------------------------------------------
-#import os
-
-#import gspread
-#from google.oauth2.service_account import Credentials
-#from dotenv import load_dotenv
-#import streamlit as st
 
 def autenticacion_google_sheets():
-    #st.write("🔄 Cargando datos desde Google Sheets...")
-    #st.write("📦 Variables de entorno actuales:")
-    #st.json(dict(os.environ))
-
+    
     # Intenta autenticarse usando st.secrets (Streamlit Cloud)
     if "GOOGLE_SERVICE_ACCOUNT" in st.secrets:
         try:
@@ -117,6 +108,14 @@ def autenticacion_google_sheets():
             st.error("❌ Error al autenticar en entorno local.")
             st.exception(e)
             raise e
+#-----------------------------------------------------------------------------------       
+# 2. Conexión al workbook
+cliente = autenticacion_google_sheets()
+workbook = cliente.open("BD DE REGISTROS FINANCIEROS")
+sheet_bancos = workbook.worksheet("Bancos")
+sheet_saldos = workbook.worksheet("Saldos")
+
+
 #------------------------------------------------------------------------------------------------
 from gspread_pandas import Spread
 # el dicccionario gspread-pandas me ayuda para gestionar mejor las cuentas en google sheets
@@ -1232,51 +1231,244 @@ def formulario_edicion(registro, worksheet, df,sheet):
 
 
 #---------------------------------------------------------------------------------------------------
-# MODULO DE GESTION DE CUENTAS BANCARIAS 
-def gestionar_cuentas():
 
+# ✅ Cachear la carga del workbook y los saldos
+@st.cache_resource
+def cargar_workbook():
+    return obtener_spread()
+
+@st.cache_data(ttl=60)
+def cargar_saldos(_spread):
+    return _spread.sheet_to_df(sheet='Saldos', index=None)
+
+def gestionar_saldos():
     st.subheader("Agregar o Modificar Saldo Inicial")
 
     try:
+        #spread = cargar_workbook()
         spread = obtener_spread()
+        #df_cuentas = cargar_saldos(spread)
+        df_cuentas = spread.sheet_to_df(sheet='Saldos', index=None)
     except Exception as e:
-        st.error("Error al autenticar con Google Sheets.")
+        st.error("No se pudo leer la hoja 'Saldos'. Verifica que exista.")
         st.exception(e)
         return
 
+    # Forzar formato dd/mm/yyyy en la columna FECHA
+    if 'FECHA' in df_cuentas.columns:
+        df_cuentas['FECHA'] = pd.to_datetime(
+            df_cuentas['FECHA'], errors='coerce',dayfirst=True
+        ).dt.strftime("%d/%m/%Y")
 
-    # Leer hoja "cuentas" como DataFrame
-    df_cuentas = spread.sheet_to_df(sheet='Cuentas', index=None)
 
-    # Asegurar que las columnas existen
-    columnas_esperadas = ['CUENTA', 'FECHA SALDO INICIAL', 'SALDO INICIAL','MONEDA']
+    columnas_esperadas = ['CUENTA', 'FECHA', 'SALDO INICIAL', 'MONEDA']
     for col in columnas_esperadas:
         if col not in df_cuentas.columns:
-            st.error(f"La columna '{col}' no está presente en la hoja 'Cuentas'. Verifica la estructura.")
+            st.error(f"Falta la columna '{col}' en la hoja 'Saldos'.")
             return
 
-    cuentas = df_cuentas['CUENTA'].dropna().unique().tolist()
+    st.write("### 📋 Saldos iniciales registrados")
+    if df_cuentas.empty:
+        st.warning("Aún no hay saldos registrados.")
+    else:
+        st.dataframe(df_cuentas)
 
-    cuenta_seleccionada = st.selectbox("Selecciona la cuenta", cuentas)
-    fecha_saldo = st.date_input("Fecha del Saldo Inicial", value=date.today(), format="DD/MM/YYYY")
-    saldo_inicial = st.number_input("Saldo Inicial", step=0.01, format="%.2f")
-    moneda = st.selectbox("Moneda del saldo inicial", ["BSF", "Dólares", "Euros"])
+    # Pregunta inicial
+    agregar_nueva = st.radio(
+        "¿Desea agregar una nueva cuenta?",
+        ("No", "Sí"),
+        horizontal=True
+    )
+
+    cuentas_existentes = df_cuentas['CUENTA'].dropna().unique().tolist()
+
+    if agregar_nueva == "Sí":
+        cuenta_final = st.text_input("Nombre de la nueva cuenta")
+
+        fecha_saldo = st.date_input(
+            "Fecha del Saldo Inicial",
+            value=date.today(),
+            format="DD/MM/YYYY"
+        )
+
+        fecha_formateada = fecha_saldo.strftime("%d/%m/%Y")  # <-- aquí el formato correcto
+
+        saldo_inicial = st.number_input("Saldo Inicial", step=0.01, format="%.2f")
+        moneda = st.selectbox("Moneda del saldo inicial", ["BSF", "Dólares", "Euros"])
+
+    else:
+        if not cuentas_existentes:
+            st.warning("No hay cuentas existentes. Debe crear una nueva.")
+            return
+
+        cuenta_seleccionada = st.selectbox("Selecciona una cuenta existente", cuentas_existentes)
+        datos_cuenta = df_cuentas[df_cuentas['CUENTA'] == cuenta_seleccionada].iloc[0]
+
+        cuenta_final = cuenta_seleccionada
+
+        try:
+            fecha_dt = datetime.strptime(str(datos_cuenta['FECHA']), "%d/%m/%Y").date()
+        except Exception:
+            fecha_dt = date.today()
+
+        fecha_saldo = st.date_input(
+            "Fecha del Saldo Inicial",
+            value=fecha_dt,
+            format="DD/MM/YYYY"
+        )
+
+        fecha_formateada = fecha_saldo.strftime("%d/%m/%Y")  # <-- convertir aquí también
+
+        saldo_inicial = st.number_input(
+            "Saldo Inicial",
+            value=float(datos_cuenta['SALDO INICIAL']),
+            step=0.01,
+            format="%.2f"
+        )
+        moneda = st.selectbox(
+            "Moneda del saldo inicial",
+            ["BSF", "Dólares", "Euros"],
+            index=["BSF", "Dólares", "Euros"].index(str(datos_cuenta['MONEDA']))
+        )
 
     if st.button("Guardar Saldo Inicial"):
+        if not cuenta_final or cuenta_final.strip() == "":
+            st.error("Debe especificar un nombre de cuenta.")
+            return
+
         try:
-            idx = df_cuentas[df_cuentas['CUENTA'] == cuenta_seleccionada].index[0]
-            df_cuentas.at[idx, 'FECHA SALDO INICIAL'] = fecha_saldo.strftime("%d/%m/%Y")
-            df_cuentas.at[idx, 'SALDO INICIAL'] = saldo_inicial
-            df_cuentas.at[idx, 'MONEDA'] = moneda
+            if agregar_nueva == "Sí":
+                nueva_fila = pd.DataFrame([{
+                    'CUENTA': cuenta_final.strip(),
+                    'FECHA': fecha_formateada,
+                    'SALDO INICIAL': saldo_inicial,
+                    'MONEDA': moneda
+                }])
+                df_cuentas = pd.concat([df_cuentas, nueva_fila], ignore_index=True)
+                accion = "registrado"
+            else:
+                idx = df_cuentas.index[df_cuentas['CUENTA'] == cuenta_final][0]
+                df_cuentas.at[idx, 'FECHA'] = fecha_formateada
+                df_cuentas.at[idx, 'SALDO INICIAL'] = saldo_inicial
+                df_cuentas.at[idx, 'MONEDA'] = moneda
+                accion = "actualizado"
 
-            spread.df_to_sheet(df_cuentas, sheet='Cuentas', index=False)
-            st.success(f"Saldo inicial actualizado para '{cuenta_seleccionada}'")
+            # Guardar de vuelta en Google Sheets
+            spread.df_to_sheet(df_cuentas, sheet='Saldos', index=False)
+            st.success(f"Saldo inicial {accion} para '{cuenta_final.strip()}'")
+            st.rerun()
+
         except Exception as e:
-            st.error("Error al actualizar el saldo inicial.")
-            st.exception(e)  
+            st.error("Error al guardar el saldo inicial.")
+            st.exception(e)
 
-#---------------------------------------------------------------------------------------------------
 
+
+#===============================================================================================
+
+@st.cache_data(ttl=60)
+def cargar_movimientos(_spread):
+    df = _spread.sheet_to_df(sheet='Hoja 1', index=None)
+    df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce").dt.date
+    return df
+
+@st.cache_data(ttl=60)
+def cargar_saldos(_spread):
+    df = _spread.sheet_to_df(sheet='Saldos', index=None)
+    df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce").dt.date
+    return df
+
+def gestionar_cuentas(spread):
+    st.header("Gestión de Cuentas Bancarias")
+
+    # 1. Cargar datos desde Google Sheets con caché
+    try:
+        df_mov = cargar_movimientos(spread)
+        df_saldos = cargar_saldos(spread)
+    except Exception as e:
+        st.error("Error al cargar los datos desde Google Sheets.")
+        st.exception(e)
+        return
+
+    # 2. Validar columnas necesarias
+    for col in ["FECHA", "CUENTA", "CATEGORIA", "MONTO"]:
+        if col not in df_mov.columns:
+            st.error(f"Falta la columna '{col}' en la hoja de movimientos.")
+            return
+    for col in ["CUENTA", "FECHA", "SALDO INICIAL"]:
+        if col not in df_saldos.columns:
+            st.error(f"Falta la columna '{col}' en la hoja de saldos.")
+            return
+
+    # 3. Selección de cuenta
+    cuentas = df_mov["CUENTA"].dropna().unique().tolist()
+    if not cuentas:
+        st.warning("No hay cuentas registradas en los movimientos.")
+        return
+    cuenta_sel = st.selectbox("Seleccione la cuenta", options=cuentas)
+
+    # 4. Selección de rango de fechas
+    rango_fechas = st.date_input(
+        "Seleccione el rango de fechas",
+        value=(date.today().replace(day=1), date.today())
+    )
+    if not isinstance(rango_fechas, (list, tuple)) or len(rango_fechas) != 2:
+        st.warning("Debe seleccionar un rango de fechas válido.")
+        return
+    fecha_inicio, fecha_fin = rango_fechas
+
+    # 5. Filtrar movimientos
+    df_filtrado = df_mov[
+        (df_mov["CUENTA"] == cuenta_sel) &
+        (df_mov["FECHA"] >= fecha_inicio) &
+        (df_mov["FECHA"] <= fecha_fin)
+    ].copy()
+
+    # 6. Determinar saldo inicial válido
+    df_saldo_cuenta = df_saldos[
+        (df_saldos["CUENTA"] == cuenta_sel) &
+        (df_saldos["FECHA"] <= fecha_inicio)
+    ]
+    if not df_saldo_cuenta.empty:
+        saldo_inicial = df_saldo_cuenta.sort_values("FECHA").iloc[-1]["SALDO INICIAL"]
+        try:
+            saldo_inicial = float(saldo_inicial)
+        except Exception:
+            saldo_inicial = 0.0
+    else:
+        saldo_inicial = 0.0
+
+    # 7. Calcular ingresos y gastos
+    ingresos = df_filtrado[df_filtrado["CATEGORIA"] == "Ingreso"]["MONTO"].sum()
+    gastos = df_filtrado[df_filtrado["CATEGORIA"] == "Gasto"]["MONTO"].sum()
+    saldo_final = saldo_inicial + ingresos - gastos
+
+    # 8. Mostrar resultados
+    st.subheader(f"Resumen de la cuenta {cuenta_sel}")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write(f"**Saldo inicial:** {saldo_inicial:,.2f}")
+        st.write(f"**Total ingresos:** {ingresos:,.2f}")
+    with col2:
+        st.write(f"**Total gastos:** {gastos:,.2f}")
+        st.write(f"### Saldo final: {saldo_final:,.2f}")
+
+    # 9. Mostrar tabla de movimientos
+    st.write("### Movimientos filtrados")
+    if df_filtrado.empty:
+        st.info("No hay movimientos para este rango de fechas.")
+    else:
+        st.dataframe(df_filtrado)
+
+
+
+
+
+
+
+
+
+#--------------------------------------------------------------------------------------------------
 
 # ESTA SECCION ES PARA CREAR EL MENU DE SELECCION ENTRE HOJA DE FORMULARIO Y REGISTROS SIDEBAR
 
@@ -1408,9 +1600,30 @@ elif pagina == "Reporte de Gastos":
     st.title("Reporte de Gastos por Tipo de Pago")
     reporte_de_gastos_por_fecha()
 
+
 elif pagina == "Bancos":
-    st.title("Gestion de Cuentas")
-    gestionar_cuentas()
+    st.title("Estado de Cuentas")
+    submenu = st.sidebar.radio(
+        "Opciones de Bancos",
+        ["Saldos Iniciales", "Gestión de Cuentas"])
+    
+    if submenu == "Saldos Iniciales":
+        st.subheader("💰 Registro de Saldos Iniciales")
+        # Aquí llamas a la función que maneja los saldos iniciales
+        gestionar_saldos()
+
+    elif submenu == "Gestión de Cuentas":
+        st.subheader("📑 Gestión de Cuentas Bancarias")
+        # Aquí llamas a la función que ya tenías
+        spread = obtener_spread()  # conecta a Google Sheets
+        gestionar_cuentas(spread)  # pasa el objeto a la función
+        
+        
+        
+
+
+    
+
 
 #==============================================================================================================#
 
