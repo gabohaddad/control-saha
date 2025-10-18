@@ -17,6 +17,7 @@ from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
 import json
 import os
+import requests
 #______________________________________________________________________________
 
 # ------------------- Inicialización segura de variables en session_state -------------------
@@ -371,7 +372,7 @@ def cargar_registros_a_google_sheets(registros,nombre_archivo="BD REGISTROS FINA
 # Función para agregar un nuevo registro
 
 # DEFINICION DE VARIABLES PARA NUEVO REGISTRO
-def agregar_registro(fecha, categoria, descripcion, monto, tipo_pago, tasa_cambio=None, 
+def agregar_registro(fecha, categoria, descripcion, monto, tipo_pago, tasa_cambio,base_de_cambio =None, 
                      subcategoria=None, responsable=None,cuenta_bancaria=None):
 
     worksheet = st.session_state.worksheet
@@ -418,6 +419,7 @@ def agregar_registro(fecha, categoria, descripcion, monto, tipo_pago, tasa_cambi
         "Tipo de pago": tipo_pago,
         "Tasa de cambio": float(tasa_cambio) if tasa_cambio else 1, # Solo incluir tasa de cambio si es BSF
         "Cuenta":cuenta_bancaria,
+        "Base de cambio":base_de_cambio,
     }
 
 # Agregar el registro a la lista
@@ -449,7 +451,7 @@ def limpiar_campos():
     keys_a_borrar = [
         "categoria", "subcategoria_tipo", "subcategoria_fijo", "subcategoria_variable",
         "responsable", "subcategoria_ingreso", "responsable_ingreso", "descripcion",
-        "monto", "tipo_pago", "tasa_cambio"
+        "monto", "tipo_pago", "tasa_cambio","base_de_cambio"
     ]
     for key in keys_a_borrar:
         if key == "descripcion":
@@ -514,9 +516,20 @@ def formulario_de_registros(sheet):
         st.session_state.monto = 0.0
     monto = st.number_input("Ingrese el monto", step=0.01, format="%.2f", key="monto")
 
-    tipo_pago = st.selectbox("Selecciona el tipo de pago", ["Dólares","BSF"], key="tipo_pago")
+    tipo_pago = st.selectbox("Selecciona el tipo de pago", ["Dolares","BSF","Euros"], key="tipo_pago")
+
+    # ✅ Define antes para evitar error si el tipo de pago no es BSF
+    base_de_cambio = None
+
     if tipo_pago == "BSF":
-        tasa_cambio = st.number_input("Tasa de cambio", min_value=0.0, format="%.2f")
+        moneda = st.selectbox(
+        "¿La tasa de cambio corresponde a?",
+        ["USD", "EUR"],
+        help="Indica si la tasa que vas a ingresar corresponde al Dólar o al Euro."
+    )
+        base_de_cambio = moneda
+
+        tasa_cambio = st.number_input(f"Ingrese la tasa de cambio BsF/{moneda}", min_value=0.0, format="%.2f")
         if tasa_cambio == 0.0:
             st.warning("⚠️ Para pagos en BSF debes ingresar la tasa de cambio.")
     else:
@@ -530,81 +543,95 @@ def formulario_de_registros(sheet):
 
     if st.button("Agregar registro"):
 
-        if tipo_pago == "BSF" and tasa_cambio in [0.0, 1.0]:
+        # Validación de tasa de cambio para BSF
+        if tipo_pago == "BSF" and (tasa_cambio in [0.0, 1.0] or tasa_cambio is None):
             st.warning("❌ No puedes guardar el registro sin ingresar una tasa de cambio.")
-            return
-                   
-        
-        if descripcion and monto > 0 and cuenta_bancaria:
-
-        
-            # Aquí iría la lógica para agregar el registro a la base de datos
-         
-            agregar_registro(fecha, categoria, descripcion, monto, tipo_pago, tasa_cambio, subcategoria, responsable,cuenta_bancaria)
+        # Validación de campos obligatorios
+        elif not descripcion or monto is None or monto <= 0 or not cuenta_bancaria:
+            st.warning("❌ Por favor, completa todos los campos antes de agregar el registro.")
+        else:
+            # Todo está correcto, agregar registro
+            agregar_registro(
+                fecha, categoria, descripcion, monto, tipo_pago, 
+                tasa_cambio, base_de_cambio, subcategoria, responsable, cuenta_bancaria
+            )
             st.success("Registro agregado correctamente")
             time.sleep(0.5)
-     
-                # Activar la limpieza de campos
             st.session_state.limpiar = True
 
-        else:
-            st.warning("Por favor, completa todos los campos antes de agregar el registro.")  
-
-#-----------------------------------------------------------------------------------------------------
-# CREACION DEL REPORTE DE INGRESOS POR CATEGORIAS
-def mostrar_resumen_ingresos(df, titulo):
-    if "SUBCATEGORIA" in df.columns and "TIPO DE PAGO" in df.columns and "TASA DE CAMBIO" in df.columns and "MONTO" in df.columns:
-        st.subheader(titulo)
-        
-        # Resumen por subcategoría de ingreso
-        resumen_subcategorias = df.groupby(["SUBCATEGORIA", "TIPO DE PAGO"])["MONTO"].sum().reset_index()
-        st.dataframe(resumen_subcategorias)
-        
-        # Sumar los montos por tipo de pago (Dólares, Zelle y BsF por separado)
-        total_ingresos = df.groupby("TIPO DE PAGO")["MONTO"].sum().reset_index()
-
-
-        # Filtrar solo ingresos en BsF
-        df_bsf = df[df["TIPO DE PAGO"] == "BSF"].copy()
-
-        # Agregar columna con monto en dólares
-        df_bsf["MONTO EN USD"] = df_bsf["MONTO"] / df_bsf["TASA DE CAMBIO"]
-
-        # Seleccionar solo las columnas necesarias
-        df_bsf_resumen = df_bsf[["SUBCATEGORIA", "MONTO", "TASA DE CAMBIO", "MONTO EN USD"]]
-
-        # Calcular el total de BsF convertidos a USD
-        total_usd = df_bsf["MONTO EN USD"].sum()
-
-        # Mostrar en Streamlit solo si hay datos en BsF
-        if not df_bsf_resumen.empty:
-            st.subheader("Ingresos en BsF convertidos a USD")
-            st.dataframe(df_bsf_resumen)
-        # Agregar el total en USD debajo del DataFrame
-        st.markdown(f"##### **Total de BsF en USD: ${total_usd:,.2f}**")
-        st.markdown("--------------------------------------------------")
-        
-        # Mostrar los totales correctamente
-        for _, row in total_ingresos.iterrows():
-            tipo_pago = row["TIPO DE PAGO"]
-            total = row["MONTO"]
-            if tipo_pago == "BSF":
-                st.metric(f"Total en {tipo_pago}", f"BsF {total:,.2f}")
-            else:
-                st.metric(f"Total en {tipo_pago}", f"${total:,.2f}")
-    else:
-        st.error("Las columnas necesarias no están presentes en los datos.")
 #----------------------------------------------------------------------------------------------------
+# este codigo usa una api externa para el encontrar la tasa de cambio eur/$ 
+            
 
+# Caché simple para no repetir llamadas a la API
+tasa_cache = {}
+
+def obtener_tasa_eur_usd(fecha):
+    """
+    Consulta la tasa EUR→USD desde Frankfurter.app (datos del BCE)
+    """
+    # Si ya tenemos la tasa en caché, la devolvemos sin pedirla otra vez
+    if fecha in tasa_cache:
+        return tasa_cache[fecha]
+
+    url = f"https://api.frankfurter.app/{fecha}?from=EUR&to=USD"
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code != 200:
+            st.warning(f"⚠️ Error HTTP {r.status_code} al consultar la tasa para {fecha}")
+            tasa_cache[fecha] = 1.0
+            return 1.0
+
+        data = r.json()
+        tasa = data.get("rates", {}).get("USD", 1.0)
+
+        if not tasa:
+            st.warning(f"No se encontró tasa para {fecha}. Se usará 1.0 por defecto.")
+            tasa = 1.0
+
+        # Guardamos en caché
+        tasa_cache[fecha] = tasa
+        return tasa
+
+    except Exception as e:
+        st.warning(f"⚠️ Error al consultar la API: {e}")
+        return 1.0
+
+#------------------------------------------------------------------------------------------------------
+# ESTE MODULO SE USARA EN AMBAS SECCION , POR SUCATEGORIA Y POR RESPONSABLE
+
+def convertir_bsf_a_usd(row):
+                if row["TIPO DE PAGO"] == "BSF":
+                    base = row.get("BASE DE CAMBIO", None)
+                    if base == "USD":
+                        return row["MONTO"] / row["TASA DE CAMBIO"]
+                    elif base == "EUR":
+                        # Convertir fecha si viene como texto
+                        fecha = row["FECHA"]
+                        if isinstance(fecha, str):
+                            fecha = pd.to_datetime(fecha, format="%d/%m/%Y", errors="coerce")
+
+                        if pd.isna(fecha):
+                            return None  # o podrías retornar el monto original
+
+                        fecha_api = row["FECHA"].strftime("%Y-%m-%d")
+                        tasa_eur_usd = obtener_tasa_eur_usd(fecha_api)
+                        
+                        # Mostrar en Streamlit
+                        st.info(f"💱 Tasa EUR→USD para {fecha_api}: {tasa_eur_usd}")
+
+                        return (row["MONTO"] / row["TASA DE CAMBIO"]) * tasa_eur_usd
+                return row["MONTO"]  # ya está en USD o no es BSF
+
+
+#-------------------------------------------------------------------------------------
 # SECCION DE REPORTES
 
-def reporte_ingresos_por_fecha():
+def reporte_ingresos_por_subcategoria():
 
-    
-    # df, _ = cargar_datos()  # Cargamos los datos desde Google Sheets
+    # Cargamos los datos desde Google Sheets
     df = st.session_state.df
     
-
     if df.empty:
         st.warning("No hay datos disponibles para generar reportes.")
         return
@@ -616,12 +643,11 @@ def reporte_ingresos_por_fecha():
     # Filtrar solo los ingresos
     df_ingresos = df[df["CATEGORIA"] == "Ingreso"]
 
-    st.subheader("💰 Reporte de Ingresos por Tipo y Subcategoría")
+    #st.subheader("💰 Reporte de Ingresos por Tipo y Subcategoría")
 # Verificar si hay datos en df_ingresos antes de calcular min/max fecha
     if df_ingresos.empty:
         st.warning("No hay ingresos registrados en la base de datos.")
         return
-
 
     # 🔹 OBTENER EL RANGO DE FECHAS
     min_fecha, max_fecha = df_ingresos["FECHA"].min(), df_ingresos["FECHA"].max()
@@ -640,8 +666,9 @@ def reporte_ingresos_por_fecha():
         fecha_inicio, fecha_fin = rango_fechas
 
         # Convertimos las fechas seleccionadas a datetime
-        fecha_inicio = pd.to_datetime(fecha_inicio)
-        fecha_fin = pd.to_datetime(fecha_fin)
+        fecha_inicio = pd.to_datetime(fecha_inicio, format="%d/%m/%Y")
+        fecha_fin = pd.to_datetime(fecha_fin, format="%d/%m/%Y")
+
 
         # Filtrar ingresos dentro del rango de fechas
         df_filtrado_ingresos = df_ingresos[
@@ -658,37 +685,201 @@ def reporte_ingresos_por_fecha():
             df_filtrado_ingresos["FECHA"] = df_filtrado_ingresos["FECHA"].dt.strftime("%d/%m/%Y")
 
             st.dataframe(df_filtrado_ingresos)
-    
-          # Llamar a la función de resumen por subcategoría de ingresos
-            mostrar_resumen_ingresos(df_filtrado_ingresos, "Resumen de Ingresos por Subcategoría")   
 
+            df_filtrado_ingresos["FECHA"] = pd.to_datetime(
+                df_filtrado_ingresos["FECHA"], format="%d/%m/%Y", errors="coerce"
+            )
+#................................................................................................
+        # CREACION DEL REPORTE DE INGRESOS POR CATEGORIAS
+
+                        
+            resumen_subcategorias = df_ingresos.groupby(["SUBCATEGORIA", "TIPO DE PAGO"])["MONTO"].sum().reset_index()
+        
+            st.subheader("💸 Reporte de Ingresos por Subcategoría")
+            st.dataframe(resumen_subcategorias)
+         
+            
+            # Total en USD ya totalizados de euros y BSF convertidos a $
+            total_usd_directo = df_ingresos[df_ingresos["TIPO DE PAGO"] == "Dolares"]["MONTO"].sum()
+            
+
+            # valor total de los BSF convertidos a USD
+            df_filtrado_ingresos["MONTO_USD"] = df_filtrado_ingresos.apply(convertir_bsf_a_usd, axis=1)
+            total_bsf_convertido = df_filtrado_ingresos[df_filtrado_ingresos["TIPO DE PAGO"] == "BSF"]["MONTO_USD"].sum()
+            
+             
+        
+            # Sumar los montos por tipo de pago (Dólares, Zelle y BsF, euros por separado)
+            total_ingresos = df_ingresos.groupby("TIPO DE PAGO")["MONTO"].sum().reset_index()
+            # Mostrar los totales correctamente
+        
+            st.markdown(
+                f"**🔢 Total General (USD):** ${total_usd_directo+total_bsf_convertido:,.2f}"
+            )
+
+        
+            for _, row in total_ingresos.iterrows():
+                tipo_pago = row["TIPO DE PAGO"]
+                total = row["MONTO"]
+                if tipo_pago == "BSF":
+                                
+                    st.markdown(f"- 🪙 Total Ingresos en BsF: {total:,.2f}")
+                elif tipo_pago == "Euros":
+                    st.markdown(f"- 💶  Total Ingresos en Euros: {total:,.2f}")
+                     
+                else: 
+                    st.markdown(f"- 💵  Total Ingresos en (USD): {total:,.2f}")
+                                             
+            st.markdown(
+                f" - 💰 Total  BsF convertidos a (USD): **${total_bsf_convertido:,.2f}**")
+        
     else:
         st.warning("⚠️ Por favor, selecciona un rango de fechas válido.")
 
 #-------------------------------------------------------------------------------------------------------
-# CREACION DEL REPORTE DE GASTOS POR CATEGORIAS
-def mostrar_resumen(df, titulo):
-     
-            
-     if "SUBCATEGORIA" in df.columns and "TIPO DE PAGO" in df.columns and "MONTO" in df.columns:
-         st.subheader(titulo)
-         resumen = df.groupby(["SUBCATEGORIA", "TIPO DE PAGO"]) ["MONTO"].sum().reset_index()
-         st.dataframe(resumen)
-                # 🔹 Sumar los montos por tipo de pago (Dólares, Zelle y BsF por separado)
-         total_general = df.groupby("TIPO DE PAGO")["MONTO"].sum().reset_index()
+ # SECCION DE REPORTES
 
-                # 🔹 Mostrar los totales correctamente
-         for _, row in total_general.iterrows():
+def reporte_ingresos_por_responsable():
+
+    # Cargamos los datos desde Google Sheets
+    df = st.session_state.df
+    
+    if df.empty:
+        st.warning("No hay datos disponibles para generar reportes.")
+        return
+
+    # Convertir la columna de fecha a tipo datetime``
+    df["FECHA"] = pd.to_datetime(df["FECHA"], format="%d/%m/%Y", errors="coerce")
+
+
+    # Filtrar solo los ingresos
+    df_ingresos = df[df["CATEGORIA"] == "Ingreso"]
+
+    #st.subheader("💰 Reporte de Ingresos por Tipo y Subcategoría")
+# Verificar si hay datos en df_ingresos antes de calcular min/max fecha
+    if df_ingresos.empty:
+        st.warning("No hay ingresos registrados en la base de datos.")
+        return
+
+    # 🔹 OBTENER EL RANGO DE FECHAS
+    min_fecha, max_fecha = df_ingresos["FECHA"].min(), df_ingresos["FECHA"].max()
+
+    
+# 🔹 3️⃣ SELECCIÓN DEL RANGO DE FECHAS EN STREAMLIT
+    rango_fechas = st.date_input(
+    "Selecciona el rango de fechas",
+    [min_fecha, max_fecha],  # Valores predeterminados
+    min_value=min_fecha,
+    max_value=max_fecha )
+
+
+# 🔹 4️⃣ VALIDAR LA SELECCIÓN Y FILTRAR EL DATAFRAME
+    if isinstance(rango_fechas, tuple) and len(rango_fechas) == 2:
+        fecha_inicio, fecha_fin = rango_fechas
+
+        # Convertimos las fechas seleccionadas a datetime
+        fecha_inicio = pd.to_datetime(fecha_inicio, format="%d/%m/%Y")
+        fecha_fin = pd.to_datetime(fecha_fin, format="%d/%m/%Y")
+
+
+        # Filtrar ingresos dentro del rango de fechas
+        df_filtrado_ingresos = df_ingresos[
+            (df_ingresos["FECHA"] >= fecha_inicio) & 
+            (df_ingresos["FECHA"] <= fecha_fin)
+        ]
+
+        if df_filtrado_ingresos.empty:
+            st.warning("⚠️ No se encontraron ingresos en este rango de fechas.")
+        else:
+            st.success(f"📅 Mostrando datos desde {fecha_inicio} hasta {fecha_fin}")
+
+            # Mostrar la fecha en formato visual
+            df_filtrado_ingresos["FECHA"] = df_filtrado_ingresos["FECHA"].dt.strftime("%d/%m/%Y")
+
+            st.dataframe(df_filtrado_ingresos)
+           
+            # se convierte la fecha a formato panda para poder hacer uso de la api
+            df_filtrado_ingresos["FECHA"] = pd.to_datetime(
+                df_filtrado_ingresos["FECHA"], format="%d/%m/%Y", errors="coerce"
+            )
+#.............................................................................................
+
+        # CREACION DEL REPORTE DE INGRESOS POR RESPONSABLES
+
+                        
+        resumen_responsable = df_ingresos.groupby(["RESPONSABLE", "TIPO DE PAGO"])["MONTO"].sum().reset_index()
+        
+        st.subheader("💸 Reporte de Ingresos por Responsable")
+        st.dataframe(resumen_responsable)
+
+#-----------------------------------------------------------------------------------------------  
+        # este codigo usa una api externa para el encontrar la tasa de cambio eur/$ 
+            
+
+        # Obtener la tasa EUR/USD reutilizando la función ya creada
+        fecha = df_ingresos["FECHA"].max()
+        tasa_eur = obtener_tasa_eur_usd(fecha)
+ 
+        # Aplicar conversión BSF → USD
+        df_ingresos["MONTO_CONVERTIDO"] = df_ingresos.apply(convertir_bsf_a_usd, axis=1)
+        total_bsf_convertido = df_filtrado_ingresos[df_filtrado_ingresos["TIPO DE PAGO"] == "BSF"]["MONTO_USD"].sum()
+ 
+ 
+ 
+
+  
+
+      
+        # Total en USD de pagos distintos a BSF
+        total_usd_directo = df_ingresos[df_ingresos["TIPO DE PAGO"] == "Dolares"]["MONTO"].sum()
+
+                    
+        # Crear una nueva columna MONTO_USD que convierta a dólares solo si es BSF, usando la tasa de cambio
+        df_filtrado_ingresos["MONTO_USD"] = df_filtrado_ingresos.apply(
+            lambda row: row["MONTO"] / row["TASA DE CAMBIO"] if row["TIPO DE PAGO"] == "BSF" else row["MONTO"],
+            axis=1
+        )
+
+        # Total convertido de BSF a USD
+        total_bsf_convertido = df_filtrado_ingresos[df_filtrado_ingresos["TIPO DE PAGO"] == "BSF"]["MONTO_USD"].sum()
+
+
+        # Sumar los montos por tipo de pago (Dólares, Zelle y BsF, euros por separado)
+        total_ingresos = df_ingresos.groupby("TIPO DE PAGO")["MONTO"].sum().reset_index()
+        # Mostrar los totales correctamente
+        
+        st.markdown(
+            f"**🔢 Total General (USD):** ${total_usd_directo+total_bsf_convertido:,.2f}"
+        )
+
+        
+        for _, row in total_ingresos.iterrows():
             tipo_pago = row["TIPO DE PAGO"]
             total = row["MONTO"]
             if tipo_pago == "BSF":
-                st.metric(f"Total en {tipo_pago}", f"BsF {total:,.2f}")
-            else:
-                st.metric(f"Total en {tipo_pago}", f"${total:,.2f}")
-     else:
-            st.error("Las columnas necesarias no están presentes en los datos.")      
-
+                                
+                st.markdown(f"- 🪙 Total Ingresos en BsF: {total:,.2f}")
+            elif tipo_pago == "Euros":
+                st.markdown(f"- 💶  Total Ingresos en Euros: {total:,.2f}")
+                     
+            else: 
+             st.markdown(f"- 💵  Total Ingresos en (USD): {total:,.2f}")
+                                             
+             st.markdown(
+                f" - 💰 Total  BsF convertidos a (USD): **${total_bsf_convertido:,.2f}**")
+        
+    else:
+        st.warning("⚠️ Por favor, selecciona un rango de fechas válido.")
+      
 #----------------------------------------------------------------------------------------------------
+
+
+
+#-----------------------------------------------------------------------------------------------
+
+
+
+
 def reporte_de_gastos_por_fecha():
     
     df = st.session_state.df
@@ -792,8 +983,8 @@ def reporte_de_gastos_por_fecha():
         # Agrupar por tipo de pago y sumar los montos
         total_gastos_por_moneda = df_gastos.groupby("TIPO DE PAGO")["MONTO"].sum().reset_index()
 
-        # Agrupar por tipo de pago y sumar los montos ya convertidos a dólares
-        total_gastos_usd = df_gastos.groupby("TIPO DE PAGO")["MONTO_USD"].sum().reset_index()
+        # Total en BSF de pagos distintos
+        total_bsf = df_gastos[df_gastos["TIPO DE PAGO"] == "BSF"]["MONTO"].sum()
 
         # Total en USD de pagos distintos a BSF
         total_usd_directo = df_gastos[df_gastos["TIPO DE PAGO"] != "BSF"]["MONTO"].sum()
@@ -801,7 +992,6 @@ def reporte_de_gastos_por_fecha():
         # Total convertido de BSF a USD
         total_bsf_convertido = df_gastos[df_gastos["TIPO DE PAGO"] == "BSF"]["MONTO_USD"].sum()
 
-        
         #--------------------------------------------------------------------------------
         # Agrupar SOLO por RESPONSABLE y TIPO DE PAGO
         # CORRECTO: usando lista
@@ -905,6 +1095,7 @@ def reporte_de_gastos_por_fecha():
 
         st.write(f"""
         **🔢 Total General (USD):** ${total_usd_directo+total_bsf_convertido:,.2f}  
+        - 🪙 Total gastos en BSF: {total_bsf:,.2f}
         - 💵 USD directos: ${total_usd_directo:,.2f}  
         - 🪙 BSF convertidos a USD: ${total_bsf_convertido:,.2f}
         """)
@@ -926,15 +1117,15 @@ def reporte_de_gastos_por_fecha():
 
         st.subheader("💰 Subtotales de Gastos Fijos por Tipo de moneda")
         st.dataframe(subtotal_fijos_pago.style.format({"MONTO": "{:,.2f}"}))
-        st.markdown(f"**Total Gastos Fijos en US$:  {total_fijos_usd:,.2f}**")
-        st.markdown(f"**Total Gastos Fijos en BSF: {total_fijos_bsf:,.2f}**")
+        st.markdown(f"**💵Total Gastos Fijos en US$:  {total_fijos_usd:,.2f}**")
+        st.markdown(f"**💴Total Gastos Fijos en BSF: {total_fijos_bsf:,.2f}**")
 
         st.markdown("---")
 
         st.subheader("💸 Subtotales de Gastos Variables por Tipo de moneda")
         st.dataframe(subtotal_variables_pago.style.format({"MONTO": "{:,.2f}"}))
-        st.markdown(f"**Total Gastos Variables en US$: {total_variables_usd:,.2f}**")
-        st.markdown(f"**Total Gastos Variables en BSF: {total_variables_bsf:,.2f}**")
+        st.markdown(f"**💵Total Gastos Variables en US$: {total_variables_usd:,.2f}**")
+        st.markdown(f"**💴Total Gastos Variables en BSF: {total_variables_bsf:,.2f}**")
 
          #================================================================================
          # REGISTROS DE SAHA     
@@ -945,10 +1136,11 @@ def reporte_de_gastos_por_fecha():
         st.dataframe(df_saha_mostrar.style.format({"MONTO": "{:,.2f}","MONTO_USD": "{:.2f}","TASA DE CAMBIO": "{:.2f}"}))
         st.write(f"""
          
-        - 💵 USD directos: ${total_usd_saha:,.2f}  
+         
+        **🔢 Total General (USD):** ${total_usd_saha+total_bsf_conver_saha:,.2f} 
         - 🪙 Total gastos en BSF: {total_bsf_saha:,.2f}
+        - 💵 USD directos: ${total_usd_saha:,.2f} 
         - 🪙 BSF convertidos a USD: ${total_bsf_conver_saha:,.2f}
-        **🔢 Total General (USD):** ${total_usd_saha+total_bsf_conver_saha:,.2f}  
         """)
 
         
@@ -1111,8 +1303,8 @@ def formulario_edicion(registro, worksheet, df,sheet):
     
     
     # Tipo de pago
-    tipo_pago = st.selectbox("Selecciona el tipo de pago", ["Dólares", "Zelle", "BSF"], 
-                             index=["Dólares","Zelle","BSF"].index(registro["TIPO DE PAGO"]), 
+    tipo_pago = st.selectbox("Selecciona el tipo de pago", ["Dolares", "Zelle", "BSF", "Euros",], 
+                             index=["Dólares","Zelle","BSF","Euros"].index(registro["TIPO DE PAGO"]), 
                              key="tipo_pago")
 
     
@@ -1242,7 +1434,7 @@ def cargar_saldos(_spread):
     return _spread.sheet_to_df(sheet='Saldos', index=None)
 
 def gestionar_saldos():
-    st.subheader("Agregar o Modificar Saldo Inicial")
+    st.subheader("Agregar o Modificar Saldo de Apertura")
 
     try:
         #spread = cargar_workbook()
@@ -1261,13 +1453,13 @@ def gestionar_saldos():
         ).dt.strftime("%d/%m/%Y")
 
 
-    columnas_esperadas = ['CUENTA', 'FECHA', 'SALDO INICIAL', 'MONEDA']
+    columnas_esperadas = ['CUENTA', 'FECHA', 'SALDO APERTURA', 'MONEDA']
     for col in columnas_esperadas:
         if col not in df_cuentas.columns:
             st.error(f"Falta la columna '{col}' en la hoja 'Saldos'.")
             return
 
-    st.write("### 📋 Saldos iniciales registrados")
+    st.write("### 📋 Saldos de aperturas registrados")
     if df_cuentas.empty:
         st.warning("Aún no hay saldos registrados.")
     else:
@@ -1286,15 +1478,15 @@ def gestionar_saldos():
         cuenta_final = st.text_input("Nombre de la nueva cuenta")
 
         fecha_saldo = st.date_input(
-            "Fecha del Saldo Inicial",
+            "Fecha del Saldo Apertura",
             value=date.today(),
             format="DD/MM/YYYY"
         )
 
         fecha_formateada = fecha_saldo.strftime("%d/%m/%Y")  # <-- aquí el formato correcto
 
-        saldo_inicial = st.number_input("Saldo Inicial", step=0.01, format="%.2f")
-        moneda = st.selectbox("Moneda del saldo inicial", ["BSF", "Dólares", "Euros"])
+        saldo_apertura = st.number_input("Saldo Apertura", step=0.01, format="%.2f")
+        moneda = st.selectbox("Moneda del saldo Apertura", ["BSF", "Dólares", "Euros"])
 
     else:
         if not cuentas_existentes:
@@ -1312,26 +1504,26 @@ def gestionar_saldos():
             fecha_dt = date.today()
 
         fecha_saldo = st.date_input(
-            "Fecha del Saldo Inicial",
+            "Fecha del Saldo Apertura",
             value=fecha_dt,
             format="DD/MM/YYYY"
         )
 
         fecha_formateada = fecha_saldo.strftime("%d/%m/%Y")  # <-- convertir aquí también
 
-        saldo_inicial = st.number_input(
-            "Saldo Inicial",
-            value=float(datos_cuenta['SALDO INICIAL']),
+        saldo_apertura = st.number_input(
+            "Saldo Apertura",
+            value=float(datos_cuenta['SALDO APERTURA']),
             step=0.01,
             format="%.2f"
         )
         moneda = st.selectbox(
-            "Moneda del saldo inicial",
+            "Moneda del saldo Apertura",
             ["BSF", "Dólares", "Euros"],
             index=["BSF", "Dólares", "Euros"].index(str(datos_cuenta['MONEDA']))
         )
 
-    if st.button("Guardar Saldo Inicial"):
+    if st.button("Guardar Saldo Apertura"):
         if not cuenta_final or cuenta_final.strip() == "":
             st.error("Debe especificar un nombre de cuenta.")
             return
@@ -1341,7 +1533,7 @@ def gestionar_saldos():
                 nueva_fila = pd.DataFrame([{
                     'CUENTA': cuenta_final.strip(),
                     'FECHA': fecha_formateada,
-                    'SALDO INICIAL': saldo_inicial,
+                    'SALDO APERTURA': saldo_apertura,
                     'MONEDA': moneda
                 }])
                 df_cuentas = pd.concat([df_cuentas, nueva_fila], ignore_index=True)
@@ -1349,17 +1541,17 @@ def gestionar_saldos():
             else:
                 idx = df_cuentas.index[df_cuentas['CUENTA'] == cuenta_final][0]
                 df_cuentas.at[idx, 'FECHA'] = fecha_formateada
-                df_cuentas.at[idx, 'SALDO INICIAL'] = saldo_inicial
+                df_cuentas.at[idx, 'SALDO APERTURA'] = saldo_apertura
                 df_cuentas.at[idx, 'MONEDA'] = moneda
                 accion = "actualizado"
 
             # Guardar de vuelta en Google Sheets
             spread.df_to_sheet(df_cuentas, sheet='Saldos', index=False)
-            st.success(f"Saldo inicial {accion} para '{cuenta_final.strip()}'")
+            st.success(f"Saldo apertura {accion} para '{cuenta_final.strip()}'")
             st.rerun()
 
         except Exception as e:
-            st.error("Error al guardar el saldo inicial.")
+            st.error("Error al guardar el saldo apertura.")
             st.exception(e)
 
 
@@ -1369,15 +1561,19 @@ def gestionar_saldos():
 @st.cache_data(ttl=60)
 def cargar_movimientos(_spread):
     df = _spread.sheet_to_df(sheet='Hoja 1', index=None)
-    df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce").dt.date
+    # Convertir la columna de fecha a tipo datetime
+    df["FECHA"] = pd.to_datetime(df["FECHA"], format="%d/%m/%Y", errors="coerce").dt.date
+    
+    #df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce").dt.date
     return df
 
 @st.cache_data(ttl=60)
 def cargar_saldos(_spread):
     df = _spread.sheet_to_df(sheet='Saldos', index=None)
-    df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce").dt.date
+    df["FECHA"] = pd.to_datetime(df["FECHA"], format="%d/%m/%Y", errors="coerce").dt.date
+    #df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce").dt.date
     return df
-
+#----------------------------------------------------------------------------------------------------
 def gestionar_cuentas(spread):
     st.header("Gestión de Cuentas Bancarias")
 
@@ -1395,19 +1591,25 @@ def gestionar_cuentas(spread):
         if col not in df_mov.columns:
             st.error(f"Falta la columna '{col}' en la hoja de movimientos.")
             return
-    for col in ["CUENTA", "FECHA", "SALDO INICIAL"]:
+    for col in ["CUENTA", "FECHA", "SALDO APERTURA"]:
         if col not in df_saldos.columns:
             st.error(f"Falta la columna '{col}' en la hoja de saldos.")
             return
 
-    # 3. Selección de cuenta
-    cuentas = df_mov["CUENTA"].dropna().unique().tolist()
+    # 3. Convertir MONTO a float para evitar errores
+    df_mov["MONTO"] = pd.to_numeric(df_mov["MONTO"], errors="coerce").fillna(0)
+    df_saldos["SALDO APERTURA"] = pd.to_numeric(df_saldos["SALDO APERTURA"], errors="coerce").fillna(0)
+    # Convertimos FECHA_APERTURA a datetime
+    df_saldos["FECHA"] = pd.to_datetime(df_saldos["FECHA"])
+
+    # 4. Selección de cuenta
+    cuentas = df_saldos["CUENTA"].dropna().unique().tolist()
     if not cuentas:
         st.warning("No hay cuentas registradas en los movimientos.")
         return
     cuenta_sel = st.selectbox("Seleccione la cuenta", options=cuentas)
 
-    # 4. Selección de rango de fechas
+    # 5. Selección de rango de fechas
     rango_fechas = st.date_input(
         "Seleccione el rango de fechas",
         value=(date.today().replace(day=1), date.today())
@@ -1417,56 +1619,83 @@ def gestionar_cuentas(spread):
         return
     fecha_inicio, fecha_fin = rango_fechas
 
-    # 5. Filtrar movimientos
+    # Obtenemos la fecha de apertura y saldo inicial de la cuenta seleccionada
+    fecha_apertura = df_saldos.loc[df_saldos["CUENTA"] == cuenta_sel, "FECHA"].iloc[0]
+    fecha_apertura = pd.to_datetime(fecha_apertura).date()  # lo convertimos a datetime.date
+
+    if fecha_inicio < fecha_apertura:
+        st.error(f"La fecha inicial no puede ser menor que la fecha de apertura de la cuenta ({fecha_apertura.strftime('%d/%m/%Y')})")
+        return
+    else:
+        st.success("Rango de fechas válido ✅")
+
+
+    # Mostrar rango seleccionado en DD/MM/YYYY
+    st.write("Rango seleccionado:", fecha_inicio.strftime("%d/%m/%Y"), " - ", fecha_fin.strftime("%d/%m/%Y"))
+
+    # 6. Filtrar movimientos
     df_filtrado = df_mov[
         (df_mov["CUENTA"] == cuenta_sel) &
         (df_mov["FECHA"] >= fecha_inicio) &
         (df_mov["FECHA"] <= fecha_fin)
     ].copy()
 
-    # 6. Determinar saldo inicial válido
-    df_saldo_cuenta = df_saldos[
-        (df_saldos["CUENTA"] == cuenta_sel) &
-        (df_saldos["FECHA"] <= fecha_inicio)
-    ]
-    if not df_saldo_cuenta.empty:
-        saldo_inicial = df_saldo_cuenta.sort_values("FECHA").iloc[-1]["SALDO INICIAL"]
-        try:
-            saldo_inicial = float(saldo_inicial)
-        except Exception:
-            saldo_inicial = 0.0
-    else:
-        saldo_inicial = 0.0
-
-    # 7. Calcular ingresos y gastos
-    ingresos = df_filtrado[df_filtrado["CATEGORIA"] == "Ingreso"]["MONTO"].sum()
-    gastos = df_filtrado[df_filtrado["CATEGORIA"] == "Gasto"]["MONTO"].sum()
-    saldo_final = saldo_inicial + ingresos - gastos
-
-    # 8. Mostrar resultados
-    st.subheader(f"Resumen de la cuenta {cuenta_sel}")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.write(f"**Saldo inicial:** {saldo_inicial:,.2f}")
-        st.write(f"**Total ingresos:** {ingresos:,.2f}")
-    with col2:
-        st.write(f"**Total gastos:** {gastos:,.2f}")
-        st.write(f"### Saldo final: {saldo_final:,.2f}")
-
-    # 9. Mostrar tabla de movimientos
+    # 10. Mostrar tabla de movimientos con fechas en DD/MM/YYYY
     st.write("### Movimientos filtrados")
     if df_filtrado.empty:
         st.info("No hay movimientos para este rango de fechas.")
     else:
-        st.dataframe(df_filtrado)
+        df_filtrado_display = df_filtrado.copy()
+        df_filtrado_display["FECHA"] = df_filtrado_display["FECHA"].apply(lambda x: x.strftime("%d/%m/%Y"))
+        st.dataframe(df_filtrado_display)
 
 
 
+    # --- 1. Obtener saldo de apertura para la cuenta seleccionada ---
+    saldo_apertura = df_saldos.loc[
+        df_saldos["CUENTA"] == cuenta_sel, "SALDO APERTURA"
+    ].values[0]
+
+    # --- 2. Filtrar movimientos de la cuenta ---
+    df_cuenta = df_mov[df_mov["CUENTA"] == cuenta_sel].copy()
+
+    # --- 3. Movimientos ANTES del rango seleccionado ---
+    # --- 3. Movimientos ANTES del rango seleccionado ---
+    mov_antes = df_cuenta[
+        (df_cuenta["FECHA"] >= fecha_apertura) &  # 🚨 Solo considerar desde apertura
+        (df_cuenta["FECHA"] < fecha_inicio)
+    ]
 
 
+    #mov_antes = df_cuenta[df_cuenta["FECHA"] < fecha_inicio]
 
+    ingresos_antes = mov_antes.loc[mov_antes["CATEGORIA"] == "Ingreso", "MONTO"].sum()
+    egresos_antes = mov_antes.loc[mov_antes["CATEGORIA"] == "Gasto", "MONTO"].sum()
 
+    saldo_inicial_intervalo = saldo_apertura + ingresos_antes + egresos_antes
+    # NOTA LOS EGRESOS YA ESTAN EN NEGATIVO POR ESO SE SUMAN
 
+    # --- 4. Movimientos DENTRO del rango seleccionado ---
+    mov_intervalo = df_cuenta[
+        (df_cuenta["FECHA"] >= fecha_inicio) &
+        (df_cuenta["FECHA"] <= fecha_fin)
+    ]
+
+    ingresos_intervalo = mov_intervalo.loc[mov_intervalo["CATEGORIA"] == "Ingreso", "MONTO"].sum()
+    egresos_intervalo = mov_intervalo.loc[mov_intervalo["CATEGORIA"] == "Gasto", "MONTO"].sum()
+
+    saldo_final_intervalo = saldo_inicial_intervalo + ingresos_intervalo + egresos_intervalo
+    # NOTA LOS EGRESOS YA ESTAN EN NEGATIVO POR ESO SE SUMAN
+
+    col1,col2=st.columns(2)
+
+    col1.metric("💰 Saldo Inicial", f"${saldo_inicial_intervalo:,.2f}")
+    col1.metric("📊 Saldo Final", f"${saldo_final_intervalo:,.2f}")
+    col2.metric("💰 Total Ingresos", f"${ingresos_intervalo:,.2f}")
+    col2.metric("📊 Total Egresos", f"${egresos_intervalo:,.2f}")
+    
+    st.write("Ingresos Antes",f"${ingresos_antes:,.2f}")
+    st.write("Egresos Antes",f"${egresos_antes:,.2f}")
 
 #--------------------------------------------------------------------------------------------------
 
@@ -1593,11 +1822,23 @@ elif pagina == "Ver Registros":
         st.warning("No hay registros para editar.")
 
 elif pagina == "Reporte de Ingresos":
-    st.title("Reporte de Ingresos por Tipo de Pago")
-    reporte_ingresos_por_fecha()
+    st.title("Reporte de Ingresos")
+    submenu = st.sidebar.radio(
+        "Opciones de Ingresos",
+        ["Por Subcategoria","Por Responsable"])
+    
+    if submenu == "Por Subcategoria":
+     st.subheader("💰 Resumen de Ingresos por subcategoria")
+     reporte_ingresos_por_subcategoria()
+    elif submenu == "Por Responsable":
+     st.subheader("💰 Resumen de Ingresos por Responsable")
+     reporte_ingresos_por_responsable() 
+
+
+
 
 elif pagina == "Reporte de Gastos":
-    st.title("Reporte de Gastos por Tipo de Pago")
+    st.title("Reporte de Gastos")
     reporte_de_gastos_por_fecha()
 
 
